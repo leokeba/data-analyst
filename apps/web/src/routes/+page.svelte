@@ -71,7 +71,7 @@
 	let selectedDataset: Dataset | null = null;
 	let datasetPreviewLoading = false;
 	let datasetPreviewError = '';
-	let datasetPreviewContent = '';
+	let datasetPreviewData: { columns: string[]; rows: string[][] } | null = null;
 
 	// State - Runs
 	let runs: Run[] = [];
@@ -310,7 +310,7 @@
 		if (!selectedDatasetId || !selectedProjectId) return;
 		datasetPreviewLoading = true;
 		datasetPreviewError = '';
-		datasetPreviewContent = '';
+		datasetPreviewData = null;
 		try {
 			const datasetSource = selectedDataset?.source ?? '';
 			const sourceLower = datasetSource.toLowerCase();
@@ -323,7 +323,7 @@
 			);
 			if (!res.ok) throw new Error('Preview not available');
 			const payload = await res.json();
-			datasetPreviewContent = JSON.stringify(payload, null, 2);
+			datasetPreviewData = payload;
 		} catch (e) {
 			datasetPreviewError = (e as Error).message;
 		} finally {
@@ -527,7 +527,7 @@
 					dataset={selectedDataset}
 					{datasetPreviewLoading}
 					{datasetPreviewError}
-					{datasetPreviewContent}
+					datasetPreviewData={datasetPreviewData}
 					onPreview={previewDataset}
 					{apiBase}
 				/>
@@ -660,4 +660,8 @@
 	:global(.tag.success) { background: #dcfce7; color: #15803d; }
 	:global(.tag.failure) { background: #fee2e2; color: #b91c1c; }
 	:global(.tag.running) { background: #e0f2fe; color: #0369a1; }
+	:global(.preview) { overflow-x: auto; border: 1px solid #e4e4e7; border-radius: 8px; padding: 12px; background: #fafafa; }
+	:global(.preview table) { width: 100%; border-collapse: collapse; font-size: 12px; }
+	:global(.preview th, .preview td) { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; white-space: nowrap; }
+	:global(.preview th) { background: #f4f4f5; font-weight: 600; position: sticky; top: 0; }
 </style>

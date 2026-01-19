@@ -20,7 +20,7 @@
 	export let dataset: Dataset | null = null;
 	export let datasetPreviewLoading = false;
 	export let datasetPreviewError = "";
-	export let datasetPreviewContent = "";
+	export let datasetPreviewData: { columns: string[]; rows: string[][] } | null = null;
 	export let onPreview: () => void;
 	export let apiBase = "";
 </script>
@@ -84,7 +84,26 @@
 	{#if datasetPreviewError}
 		<p class="error">{datasetPreviewError}</p>
 	{/if}
-	{#if datasetPreviewContent}
-		<pre class="preview">{datasetPreviewContent}</pre>
+	{#if datasetPreviewData}
+		<div class="preview">
+			<table>
+				<thead>
+					<tr>
+						{#each datasetPreviewData.columns as column}
+							<th>{column}</th>
+						{/each}
+					</tr>
+				</thead>
+				<tbody>
+					{#each datasetPreviewData.rows as row}
+						<tr>
+							{#each row as cell}
+								<td>{cell}</td>
+							{/each}
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
 	{/if}
 </div>
