@@ -1,6 +1,9 @@
 # Project workspaces
 /projects/
 
+# Beads metadata (tracked on beads-sync branch)
+/.beads/
+
 # Secrets and local env files
 **/secrets/
 .env
