@@ -40,7 +40,10 @@
 	export let totalCount: number | null = null;
 	export let onClearRunFilter: () => void;
 	export let onPreviewArtifact: (artifactId: string) => void;
-	export let onDeleteArtifact: (artifactId: string) => void;
+	export let pendingDeleteArtifactId = "";
+	export let onRequestDelete: (artifactId: string) => void;
+	export let onConfirmDelete: (artifactId: string) => void;
+	export let onCancelDelete: () => void;
 	export let onRerunSelected: () => void;
 	export let onPrevPage: () => void;
 	export let onNextPage: () => void;
@@ -120,13 +123,27 @@
 									? "Loading…"
 									: "Preview"}
 							</button>
-							<button
-								class="danger"
-								on:click={() => onDeleteArtifact(artifact.id)}
-								disabled={deletingArtifactId === artifact.id}
-							>
-								{deletingArtifactId === artifact.id ? "Deleting…" : "Delete"}
-							</button>
+							{#if pendingDeleteArtifactId === artifact.id}
+								<span class="tag failure">Confirm delete?</span>
+								<button
+									class="danger"
+									on:click={() => onConfirmDelete(artifact.id)}
+									disabled={deletingArtifactId === artifact.id}
+								>
+									{deletingArtifactId === artifact.id ? "Deleting…" : "Confirm"}
+								</button>
+								<button class="secondary" on:click={onCancelDelete}>
+									Cancel
+								</button>
+							{:else}
+								<button
+									class="danger"
+									on:click={() => onRequestDelete(artifact.id)}
+									disabled={deletingArtifactId === artifact.id}
+								>
+									{deletingArtifactId === artifact.id ? "Deleting…" : "Delete"}
+								</button>
+							{/if}
 						</div>
 					{/if}
 				</li>

@@ -20,6 +20,14 @@ Data‑analyst agent framework for end‑to‑end ingestion, profiling, analysis
 3. Optional API base override:
 	- `VITE_API_BASE=http://127.0.0.1:8000 cd apps/web && npm run dev -- --host 127.0.0.1 --port 5173`
 
+### Production builds
+**API (FastAPI)**
+- `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir apps/api`
+
+**Web UI (SvelteKit)**
+- `cd apps/web && VITE_API_BASE=http://127.0.0.1:8000 npm run build`
+- `cd apps/web && npm run preview -- --host 0.0.0.0 --port 4173`
+
 ### Tests
 - `uv run pytest apps/api/tests`
 

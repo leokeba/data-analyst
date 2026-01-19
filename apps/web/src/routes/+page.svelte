@@ -116,6 +116,7 @@
 	let previewArtifactId = '';
 	let previewMimeType = '';
 	let deletingArtifactId = '';
+	let pendingDeleteArtifactId = '';
 	let artifactsLimit = 10;
 	let artifactsOffset = 0;
 	let artifactsHasNext = false;
@@ -564,8 +565,15 @@
 		}
 	}
 
-	async function deleteArtifact(artifactId: string) {
-		if(!confirm("Delete this artifact?")) return;
+	function requestDeleteArtifact(artifactId: string) {
+		pendingDeleteArtifactId = artifactId;
+	}
+
+	function cancelDeleteArtifact() {
+		pendingDeleteArtifactId = '';
+	}
+
+	async function confirmDeleteArtifact(artifactId: string) {
 		deletingArtifactId = artifactId;
 		try {
 			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/artifacts/${artifactId}`, { method: 'DELETE' });
@@ -575,6 +583,7 @@
 			artifactActionError = (e as Error).message;
 		} finally {
 			deletingArtifactId = '';
+			pendingDeleteArtifactId = '';
 		}
 	}
 
@@ -717,7 +726,10 @@
 					onPrevPage={prevArtifactsPage}
 					onNextPage={nextArtifactsPage}
 					onPreviewArtifact={onPreviewArtifact}
-					onDeleteArtifact={deleteArtifact}
+					pendingDeleteArtifactId={pendingDeleteArtifactId}
+					onRequestDelete={requestDeleteArtifact}
+					onConfirmDelete={confirmDeleteArtifact}
+					onCancelDelete={cancelDeleteArtifact}
 					onClearRunFilter={clearRunSelection}
 					onRerunSelected={rerunSelected}
 				/>
