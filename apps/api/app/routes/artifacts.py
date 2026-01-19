@@ -27,6 +27,17 @@ def get_artifact(project_id: str, artifact_id: str) -> ArtifactRead:
     return artifact
 
 
+@router.delete("/{artifact_id}", status_code=204)
+def delete_artifact(project_id: str, artifact_id: str) -> None:
+    artifact = store.get_artifact(artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    run = store.get_run(artifact.run_id)
+    if not run or run.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    store.delete_artifact(project_id, artifact_id)
+
+
 @router.get("/{artifact_id}/download")
 def download_artifact(project_id: str, artifact_id: str) -> FileResponse:
     project = store.get_project(project_id)

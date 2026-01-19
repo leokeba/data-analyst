@@ -55,6 +55,17 @@ def download_dataset(project_id: str, dataset_id: str) -> FileResponse:
     )
 
 
+@router.get("/{dataset_id}/preview")
+def preview_dataset(project_id: str, dataset_id: str) -> dict[str, object]:
+    dataset = store.get_dataset(dataset_id)
+    if not dataset or dataset.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    preview = store.get_dataset_preview(project_id, dataset_id)
+    if not preview:
+        raise HTTPException(status_code=400, detail="Dataset preview not available")
+    return preview
+
+
 @router.post("/upload", response_model=DatasetRead, status_code=201)
 async def upload_dataset(project_id: str, file: UploadFile = File(...)) -> DatasetRead:
     if not store.get_project(project_id):

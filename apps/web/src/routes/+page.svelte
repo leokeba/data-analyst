@@ -29,6 +29,9 @@
 	let newDatasetSource = "";
 	let isCreatingDataset = false;
 	let createDatasetError = "";
+	let datasetPreviewLoading = false;
+	let datasetPreviewError = "";
+	let datasetPreviewContent = "";
 	let datasets: Dataset[] = [];
 	let datasetError = "";
 	let datasetsLoading = false;
@@ -49,6 +52,8 @@
 	let artifacts: Artifact[] = [];
 	let artifactsLoading = false;
 	let artifactsError = "";
+	let artifactActionError = "";
+	let deletingArtifactId = "";
 	let selectedRunId = "";
 	let previewArtifactId = "";
 	let previewContent = "";
@@ -341,6 +346,31 @@
 		}
 	};
 
+	const previewDataset = async () => {
+		if (!selectedProjectId || !selectedDatasetId) {
+			datasetPreviewError = "Select a dataset first.";
+			return;
+		}
+		datasetPreviewLoading = true;
+		datasetPreviewError = "";
+		datasetPreviewContent = "";
+		try {
+			const response = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/datasets/${selectedDatasetId}/preview`
+			);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			const payload = await response.json();
+			datasetPreviewContent = JSON.stringify(payload, null, 2);
+		} catch (err) {
+			datasetPreviewError =
+				err instanceof Error ? err.message : "Preview failed";
+		} finally {
+			datasetPreviewLoading = false;
+		}
+	};
+
 	const selectDataset = (datasetId: string) => {
 		selectedDatasetId = datasetId;
 	};
@@ -479,6 +509,30 @@
 			previewError = err instanceof Error ? err.message : "Preview failed";
 		} finally {
 			previewLoading = false;
+		}
+	};
+
+	const deleteArtifact = async (artifactId: string) => {
+		if (!selectedProjectId) {
+			artifactActionError = "Select a project first.";
+			return;
+		}
+		artifactActionError = "";
+		deletingArtifactId = artifactId;
+		try {
+			const response = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/artifacts/${artifactId}`,
+				{ method: "DELETE" }
+			);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			await loadArtifacts(selectedProjectId, selectedRunId || undefined);
+		} catch (err) {
+			artifactActionError =
+				err instanceof Error ? err.message : "Failed to delete artifact";
+		} finally {
+			deletingArtifactId = "";
 		}
 	};
 </script>
@@ -730,7 +784,16 @@
 						<span>Columns: {datasetById(selectedDatasetId)?.stats?.column_count ?? "—"}</span>
 						<span>File size: {datasetById(selectedDatasetId)?.stats?.file_size_bytes ?? "—"} bytes</span>
 					{/if}
+					<button class="secondary" on:click={previewDataset} disabled={datasetPreviewLoading}>
+						{datasetPreviewLoading ? "Loading…" : "Preview"}
+					</button>
 				</div>
+				{#if datasetPreviewError}
+					<p class="error">{datasetPreviewError}</p>
+				{/if}
+				{#if datasetPreviewContent}
+					<pre class="preview">{datasetPreviewContent}</pre>
+				{/if}
 				{#if datasetById(selectedDatasetId)?.schema_snapshot?.columns?.length}
 					<ul>
 						{#each datasetById(selectedDatasetId)?.schema_snapshot?.columns ?? [] as column}
@@ -809,6 +872,13 @@
 										? "Loading…"
 										: "Preview"}
 								</button>
+								<button
+									class="danger"
+									on:click={() => deleteArtifact(artifact.id)}
+									disabled={deletingArtifactId === artifact.id}
+								>
+									{deletingArtifactId === artifact.id ? "Deleting…" : "Delete"}
+								</button>
 							{/if}
 						</li>
 					{/each}
@@ -819,6 +889,9 @@
 			{/if}
 			{#if previewContent}
 				<pre class="preview">{previewContent}</pre>
+			{/if}
+			{#if artifactActionError}
+				<p class="error">{artifactActionError}</p>
 			{/if}
 		</div>
 	</section>

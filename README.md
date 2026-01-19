@@ -122,12 +122,14 @@ Data‑analyst agent framework for end‑to‑end ingestion, profiling, analysis
 - `GET /projects/{id}/datasets`, `GET /projects/{id}/datasets/{dataset_id}`
 - `DELETE /projects/{id}/datasets/{dataset_id}`
 - `GET /projects/{id}/datasets/{dataset_id}/download`
+- `GET /projects/{id}/datasets/{dataset_id}/preview`
 - `POST /projects/{id}/runs` (profile|analysis|report)
 - `GET /projects/{id}/runs`, `GET /projects/{id}/runs/{run_id}`
 - `DELETE /projects/{id}/runs/{run_id}`
 - `GET /projects/{id}/artifacts` (optional `?run_id=` filter)
 - `GET /projects/{id}/artifacts/{artifact_id}`
 - `GET /projects/{id}/artifacts/{artifact_id}/download`
+- `DELETE /projects/{id}/artifacts/{artifact_id}`
 
 ### Frontend MVP pages
 - **Projects**: list + create.

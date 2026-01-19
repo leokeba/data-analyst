@@ -240,6 +240,24 @@ def get_dataset_file_path(project_id: str, dataset_id: str) -> Path | None:
     return source_path
 
 
+def get_dataset_preview(project_id: str, dataset_id: str) -> dict[str, object] | None:
+    dataset_path = get_dataset_file_path(project_id, dataset_id)
+    if not dataset_path:
+        return None
+    if dataset_path.suffix.lower() != ".csv":
+        return None
+    header: list[str] = []
+    rows: list[list[str]] = []
+    with dataset_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+        reader = csv.reader(handle)
+        header = next(reader, [])
+        for idx, row in enumerate(reader):
+            rows.append(row)
+            if idx >= 19:
+                break
+    return {"columns": header, "rows": rows, "row_count": len(rows)}
+
+
 def delete_dataset(project_id: str, dataset_id: str) -> None:
     workspace_root: Path | None = None
     source_path: Path | None = None
@@ -364,7 +382,7 @@ def _profile_dataset(dataset_id: str) -> dict[str, object] | None:
             return None
         row_count = 0
         header: list[str] = []
-        with source_path.open("r", encoding="utf-8", newline="") as handle:
+        with source_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
             reader = csv.reader(handle)
             header = next(reader, [])
             for _ in reader:
@@ -446,7 +464,7 @@ def _analyze_dataset(dataset_id: str) -> dict[str, object] | None:
             return None
     sample_rows: list[list[str]] = []
     header: list[str] = []
-    with source_path.open("r", encoding="utf-8", newline="") as handle:
+    with source_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
         reader = csv.reader(handle)
         header = next(reader, [])
         for idx, row in enumerate(reader):
@@ -522,3 +540,24 @@ def get_artifact(artifact_id: str) -> ArtifactRead | None:
     with get_session() as session:
         artifact = session.get(Artifact, artifact_id)
     return _artifact_read(artifact) if artifact else None
+
+
+def delete_artifact(project_id: str, artifact_id: str) -> None:
+    workspace_root: Path | None = None
+    artifact_path: Path | None = None
+    with get_session() as session:
+        artifact = session.get(Artifact, artifact_id)
+        run = session.get(Run, artifact.run_id) if artifact else None
+        project = session.get(Project, project_id)
+        if not artifact or not run or not project or run.project_id != project_id:
+            return
+        artifact_path = Path(artifact.path)
+        workspace_root = Path(project.workspace_path)
+        session.delete(artifact)
+        session.commit()
+    if workspace_root and artifact_path:
+        repo_root = _repo_root().resolve()
+        workspace_root = workspace_root.resolve()
+        artifact_path = artifact_path.resolve()
+        if artifact_path.is_file() and artifact_path.is_relative_to(workspace_root) and artifact_path.is_relative_to(repo_root):
+            artifact_path.unlink(missing_ok=True)

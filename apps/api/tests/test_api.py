@@ -27,6 +27,14 @@ def test_project_dataset_run_flow(client, tmp_path: Path):
     assert download_resp.status_code == 200
     assert download_resp.text.strip().startswith("a,b")
 
+    preview_resp = client.get(
+        f"/projects/{project_id}/datasets/{dataset['id']}/preview",
+    )
+    assert preview_resp.status_code == 200
+    preview = preview_resp.json()
+    assert preview["columns"] == ["a", "b"]
+    assert preview["row_count"] == 2
+
     run_resp = client.post(
         f"/projects/{project_id}/runs",
         json={"dataset_id": dataset["id"], "type": "profile"},
@@ -42,6 +50,11 @@ def test_project_dataset_run_flow(client, tmp_path: Path):
     assert artifacts_resp.status_code == 200
     artifacts = artifacts_resp.json()
     assert len(artifacts) >= 1
+
+    delete_artifact_resp = client.delete(
+        f"/projects/{project_id}/artifacts/{artifacts[0]['id']}",
+    )
+    assert delete_artifact_resp.status_code == 204
 
     report_resp = client.post(
         f"/projects/{project_id}/runs",
