@@ -95,9 +95,8 @@ def delete_project(project_id: str) -> None:
         delete_dataset(project_id, dataset_id)
 
 
-def create_dataset(project_id: str, payload: DatasetCreate) -> DatasetRead:
+def _create_dataset_record(project_id: str, payload: DatasetCreate) -> DatasetRead:
     dataset_id = uuid4().hex
-    _maybe_copy_source(project_id, payload.source)
     dataset = DatasetRead(
         id=dataset_id,
         project_id=project_id,
@@ -109,6 +108,19 @@ def create_dataset(project_id: str, payload: DatasetCreate) -> DatasetRead:
     )
     _datasets[dataset_id] = dataset
     return dataset
+
+
+def create_dataset(project_id: str, payload: DatasetCreate) -> DatasetRead:
+    _maybe_copy_source(project_id, payload.source)
+    return _create_dataset_record(project_id, payload)
+
+
+def create_dataset_from_upload(project_id: str, filename: str, data: bytes) -> DatasetRead:
+    workspace = _ensure_project_workspace(project_id)
+    dest_path = workspace / "data" / "raw" / filename
+    dest_path.write_bytes(data)
+    payload = DatasetCreate(name=filename, source=f"file://{dest_path}")
+    return _create_dataset_record(project_id, payload)
 
 
 def list_datasets(project_id: str) -> list[DatasetRead]:
