@@ -339,6 +339,10 @@
 		}
 	};
 
+	const selectDataset = (datasetId: string) => {
+		selectedDatasetId = datasetId;
+	};
+
 	const createRun = async () => {
 		runMessage = "";
 		runError = "";
@@ -402,6 +406,8 @@
 		const dataset = datasets.find((item) => item.id === datasetId);
 		return dataset ? dataset.name : datasetId;
 	};
+
+	const datasetById = (datasetId: string) => datasets.find((item) => item.id === datasetId);
 
 	const runById = (runId: string) => runs.find((item) => item.id === runId);
 
@@ -580,6 +586,13 @@
 								</span>
 							{/if}
 							<button
+								class="secondary"
+								on:click={() => selectDataset(dataset.id)}
+								disabled={selectedDatasetId === dataset.id}
+							>
+								{selectedDatasetId === dataset.id ? "Selected" : "View"}
+							</button>
+							<button
 								class="danger"
 								on:click={() => deleteDataset(dataset.id)}
 								disabled={deletingDatasetId === dataset.id}
@@ -665,6 +678,35 @@
 						</li>
 					{/each}
 				</ul>
+			{/if}
+		</div>
+		<div class="card">
+			<h2>Dataset detail</h2>
+			<p>Review schema and basic stats.</p>
+			{#if !selectedDatasetId}
+				<p class="muted">Select a dataset to see details.</p>
+			{:else if !datasetById(selectedDatasetId)}
+				<p class="muted">Dataset not found.</p>
+			{:else}
+				<div class="summary">
+					<strong>{datasetById(selectedDatasetId)?.name}</strong>
+					<span>Source: {datasetById(selectedDatasetId)?.source}</span>
+					{#if datasetById(selectedDatasetId)?.stats}
+						<span>Rows: {datasetById(selectedDatasetId)?.stats?.row_count ?? "—"}</span>
+						<span>Columns: {datasetById(selectedDatasetId)?.stats?.column_count ?? "—"}</span>
+						<span>File size: {datasetById(selectedDatasetId)?.stats?.file_size_bytes ?? "—"} bytes</span>
+					{/if}
+				</div>
+				{#if datasetById(selectedDatasetId)?.schema_snapshot?.columns?.length}
+					<ul>
+						{#each datasetById(selectedDatasetId)?.schema_snapshot?.columns ?? [] as column}
+							<li>
+								<strong>{column.name}</strong>
+								<span>Index: {column.index}</span>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			{/if}
 		</div>
 		<div class="card">
