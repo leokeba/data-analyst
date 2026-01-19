@@ -1,75 +1,19 @@
-<svelte:head>
-	<title>Data Analyst Control Plane</title>
-</svelte:head>
-
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onMount } from 'svelte';
+	import ProjectsCard from '$lib/components/ProjectsCard.svelte';
+	import DatasetsCard from '$lib/components/DatasetsCard.svelte';
+	import DatasetDetailCard from '$lib/components/DatasetDetailCard.svelte';
+	import RunsCard from '$lib/components/RunsCard.svelte';
+	import ReportsCard from '$lib/components/ReportsCard.svelte';
 
-	type Project = {
-		id: string;
-		name: string;
-		created_at: string;
-		workspace_path: string;
-	};
+	const apiBase = 'http://localhost:8000';
 
-	let projects: Project[] = [];
-	let loading = true;
-	let error = "";
-	let newProjectName = "";
-	let isCreating = false;
-	let createError = "";
-	let projectActionError = "";
-	let deletingProjectId = "";
-	let selectedProjectId = "";
-	let uploadFile: File | null = null;
-	let uploadError = "";
-	let uploadMessage = "";
-	let isUploading = false;
-	let newDatasetName = "";
-	let newDatasetSource = "";
-	let isCreatingDataset = false;
-	let createDatasetError = "";
-	let datasetPreviewLoading = false;
-	let datasetPreviewError = "";
-	let datasetPreviewContent = "";
-	let datasets: Dataset[] = [];
-	let datasetError = "";
-	let datasetsLoading = false;
-	let datasetActionError = "";
-	let deletingDatasetId = "";
-	let selectedDatasetId = "";
-	let runType: RunType = "profile";
-	let runMessage = "";
-	let runError = "";
-	let isRunning = false;
-	let runs: Run[] = [];
-	let runsLoading = false;
-	let runsError = "";
-	let runActionError = "";
-	let deletingRunId = "";
-	let runTypeFilter: RunType | "all" = "all";
-	let runSearch = "";
-	let artifacts: Artifact[] = [];
-	let artifactsLoading = false;
-	let artifactsError = "";
-	let artifactActionError = "";
-	let deletingArtifactId = "";
-	let selectedRunId = "";
-	let previewArtifactId = "";
-	let previewContent = "";
-	let previewError = "";
-	let previewLoading = false;
-	let artifactTypeFilter = "all";
-	let artifactSearch = "";
-
-	const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
-
+	// Helper types
+	type Project = { id: string; name: string; workspace_path: string };
 	type Dataset = {
 		id: string;
-		project_id: string;
 		name: string;
 		source: string;
-		created_at: string;
 		stats?: {
 			row_count?: number;
 			column_count?: number;
@@ -81,19 +25,14 @@
 			columns?: { name: string; index: number }[];
 		};
 	};
-
-	type RunType = "ingest" | "profile" | "analysis" | "report";
-
 	type Run = {
 		id: string;
-		project_id: string;
 		dataset_id: string;
-		type: RunType;
+		type: string;
 		status: string;
 		started_at: string;
 		finished_at: string | null;
 	};
-
 	type Artifact = {
 		id: string;
 		run_id: string;
@@ -103,1060 +42,622 @@
 		size: number;
 	};
 
-	onMount(async () => {
-		await loadProjects();
+	// State - Projects
+	let projects: Project[] = [];
+	let loading = true;
+	let error = '';
+	let createError = '';
+	let projectActionError = '';
+	let newProjectName = '';
+	let isCreating = false;
+	let deletingProjectId = '';
+	let selectedProjectId = '';
+
+	// State - Datasets
+	let datasets: Dataset[] = [];
+	let datasetsLoading = false;
+	let datasetError = '';
+	let uploadError = '';
+	let uploadMessage = '';
+	let isUploading = false;
+	let uploaderInput: File | null = null;
+	let newDatasetName = '';
+	let newDatasetSource = '';
+	let isCreatingDataset = false;
+	let createDatasetError = '';
+	let datasetActionError = '';
+	let deletingDatasetId = '';
+	let selectedDatasetId = '';
+	let selectedDataset: Dataset | null = null;
+	let datasetPreviewLoading = false;
+	let datasetPreviewError = '';
+	let datasetPreviewContent = '';
+
+	// State - Runs
+	let runs: Run[] = [];
+	let runsLoading = false;
+	let runsError = '';
+	let runError = '';
+	let runMessage = '';
+	let runActionError = '';
+	let isRunning = false;
+	let deletingRunId = '';
+	let selectedRunId = '';
+	let selectedRun: Run | null = null;
+	let runType: 'ingest' | 'profile' | 'analysis' | 'report' = 'profile';
+	let runTypeFilter: 'all' | 'ingest' | 'profile' | 'analysis' | 'report' = 'all';
+	let runSearch = '';
+
+	// State - Artifacts/Reports
+	let selectedRunArtifacts: Artifact[] = [];
+	let selectedRunArtifactTypes: string[] = [];
+	let artifactsLoading = false;
+	let artifactsError = '';
+	let artifactActionError = '';
+	let artifactTypeFilter = 'all';
+	let artifactSearch = '';
+	let previewError = ''; 
+	
+	// Artifact Preview State
+	let previewContent = '';
+	let previewLoading = false;
+	let previewArtifactId = '';
+	let deletingArtifactId = '';
+
+	// Derived
+	$: if (selectedDatasetId && datasets.length) {
+		selectedDataset = datasets.find((d) => d.id === selectedDatasetId) || null;
+	} else {
+		selectedDataset = null;
+	}
+
+	$: if (selectedRunId && runs.length) {
+		selectedRun = runs.find((r) => r.id === selectedRunId) || null;
+	} else {
+		selectedRun = null;
+	}
+	
+	$: latestRunForDataset = (datasetId: string) => {
+		const datasetRuns = runs.filter(r => r.dataset_id === datasetId);
+		if (datasetRuns.length === 0) return null;
+		return datasetRuns.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())[0];
+	};
+
+	$: datasetNameById = (datasetId: string) => {
+		const ds = datasets.find(d => d.id === datasetId);
+		return ds ? ds.name : 'Unknown';
+	};
+	
+	$: filteredRuns = runs.filter((r) => {
+		if (runTypeFilter !== 'all' && r.type !== runTypeFilter) return false;
+		if (runSearch) {
+			const dsName = datasetNameById(r.dataset_id).toLowerCase();
+			return dsName.includes(runSearch.toLowerCase()) || r.id.includes(runSearch);
+		}
+		return true;
 	});
 
-	const loadProjects = async () => {
+	$: filteredArtifacts = selectedRunArtifacts.filter((a) => {
+		if (artifactTypeFilter !== 'all' && a.type !== artifactTypeFilter) return false;
+		if (artifactSearch && !a.path.toLowerCase().includes(artifactSearch.toLowerCase()))
+			return false;
+		return true;
+	});
+	
+	$: artifactTypes = Array.from(new Set(selectedRunArtifacts.map(a => a.type)));
+
+	// Initialization
+	onMount(() => {
+		loadProjects();
+	});
+
+	// --- API Actions ---
+
+	async function loadProjects() {
 		loading = true;
-		error = "";
+		error = '';
 		try {
-			const response = await fetch(`${apiBase}/projects`);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			projects = await response.json();
-		} catch (err) {
-			error = err instanceof Error ? err.message : "Failed to load projects";
+			const res = await fetch(`${apiBase}/projects`);
+			if (!res.ok) throw new Error('Failed to fetch projects');
+			projects = await res.json();
+		} catch (e) {
+			error = (e as Error).message;
 		} finally {
 			loading = false;
 		}
-	};
+	}
 
-	const createProject = async () => {
-		if (!newProjectName.trim()) {
-			createError = "Project name is required.";
-			return;
-		}
+	async function createProject() {
+		if (!newProjectName) return;
 		isCreating = true;
-		createError = "";
-		projectActionError = "";
+		createError = '';
 		try {
-			const response = await fetch(`${apiBase}/projects`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ name: newProjectName.trim() })
+			const res = await fetch(`${apiBase}/projects`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: newProjectName })
 			});
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			const created = await response.json();
-			newProjectName = "";
-			if (!selectedProjectId) {
-				selectedProjectId = created.id;
-				await loadDatasets(created.id);
-				await loadRuns(created.id);
-				await loadArtifacts(created.id);
-			}
-			await loadProjects();
-		} catch (err) {
-			createError = err instanceof Error ? err.message : "Failed to create project";
+			if (!res.ok) throw new Error('Failed to create project');
+			const project = await res.json();
+			projects = [...projects, project];
+			newProjectName = '';
+			selectProject(project.id);
+		} catch (e) {
+			createError = (e as Error).message;
 		} finally {
 			isCreating = false;
 		}
-	};
+	}
 
-	const deleteProject = async (projectId: string) => {
-		projectActionError = "";
+	async function deleteProject(projectId: string) {
+		if (!confirm('Are you sure you want to delete this project?')) return;
 		deletingProjectId = projectId;
+		projectActionError = '';
 		try {
-			const response = await fetch(`${apiBase}/projects/${projectId}`, {
-				method: "DELETE"
-			});
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
+			const res = await fetch(`${apiBase}/projects/${projectId}`, { method: 'DELETE' });
+			if (!res.ok) throw new Error('Failed to delete project');
+			projects = projects.filter((p) => p.id !== projectId);
 			if (selectedProjectId === projectId) {
-				selectedProjectId = "";
-				selectedDatasetId = "";
+				selectedProjectId = '';
 				datasets = [];
 				runs = [];
-				artifacts = [];
 			}
-			await loadProjects();
-		} catch (err) {
-			projectActionError =
-				err instanceof Error ? err.message : "Failed to delete project";
+		} catch (e) {
+			projectActionError = (e as Error).message;
 		} finally {
-			deletingProjectId = "";
+			deletingProjectId = '';
 		}
-	};
+	}
 
-	const loadDatasets = async (projectId: string) => {
+	async function selectProject(projectId: string) {
+		selectedProjectId = projectId;
+		datasets = [];
+		runs = [];
+		selectedDatasetId = '';
+		selectedRunId = '';
+		selectedRunArtifacts = [];
+		await Promise.all([loadDatasets(), loadRuns()]);
+	}
+
+	// Datasets
+	async function loadDatasets() {
+		if (!selectedProjectId) return;
 		datasetsLoading = true;
-		datasetError = "";
+		datasetError = '';
 		try {
-			const response = await fetch(`${apiBase}/projects/${projectId}/datasets`);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			datasets = await response.json();
-		} catch (err) {
-			datasetError = err instanceof Error ? err.message : "Failed to load datasets";
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/datasets`);
+			if (!res.ok) throw new Error('Failed to fetch datasets');
+			datasets = await res.json();
+		} catch (e) {
+			datasetError = (e as Error).message;
 		} finally {
 			datasetsLoading = false;
 		}
-	};
+	}
 
-	const loadRuns = async (projectId: string) => {
-		runsLoading = true;
-		runsError = "";
-		try {
-			const response = await fetch(`${apiBase}/projects/${projectId}/runs`);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			runs = await response.json();
-		} catch (err) {
-			runsError = err instanceof Error ? err.message : "Failed to load runs";
-		} finally {
-			runsLoading = false;
-		}
-	};
-
-	const loadArtifacts = async (projectId: string, runId?: string) => {
-		artifactsLoading = true;
-		artifactsError = "";
-		try {
-			const url = new URL(`${apiBase}/projects/${projectId}/artifacts`);
-			if (runId) {
-				url.searchParams.set("run_id", runId);
-			}
-			const response = await fetch(url.toString());
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			artifacts = await response.json();
-		} catch (err) {
-			artifactsError = err instanceof Error ? err.message : "Failed to load artifacts";
-		} finally {
-			artifactsLoading = false;
-		}
-	};
-
-	const handleProjectSelection = async (value: string) => {
-		selectedProjectId = value;
-		selectedDatasetId = "";
-		if (value) {
-			await loadDatasets(value);
-			await loadRuns(value);
-			selectedRunId = "";
-			await loadArtifacts(value);
-		} else {
-			datasets = [];
-			runs = [];
-			artifacts = [];
-			selectedRunId = "";
-		}
-	};
-
-	const uploadDataset = async () => {
-		uploadError = "";
-		uploadMessage = "";
-		if (!selectedProjectId) {
-			uploadError = "Select a project first.";
-			return;
-		}
-		if (!uploadFile) {
-			uploadError = "Choose a file to upload.";
-			return;
-		}
+	async function ingestFile() {
+		if (!uploaderInput || !selectedProjectId) return;
 		isUploading = true;
+		uploadError = '';
+		uploadMessage = '';
 		try {
 			const formData = new FormData();
-			formData.append("file", uploadFile);
-			const response = await fetch(
+			formData.append('file', uploaderInput);
+			const res = await fetch(
 				`${apiBase}/projects/${selectedProjectId}/datasets/upload`,
 				{
-					method: "POST",
+					method: 'POST',
 					body: formData
 				}
 			);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			uploadMessage = "Dataset uploaded.";
-			uploadFile = null;
-			await loadDatasets(selectedProjectId);
-		} catch (err) {
-			uploadError = err instanceof Error ? err.message : "Upload failed";
+			if (!res.ok) throw new Error('Upload failed');
+			const dataset = await res.json();
+			uploadMessage = 'Upload successful';
+			datasets = [...datasets, dataset];
+		} catch (e) {
+			uploadError = (e as Error).message;
 		} finally {
 			isUploading = false;
+			uploaderInput = null;
 		}
-	};
+	}
 
-	const createDataset = async () => {
-		createDatasetError = "";
-		if (!selectedProjectId) {
-			createDatasetError = "Select a project first.";
-			return;
-		}
-		if (!newDatasetName.trim() || !newDatasetSource.trim()) {
-			createDatasetError = "Name and source are required.";
-			return;
-		}
+	async function createDataset() {
+		if (!newDatasetName || !newDatasetSource || !selectedProjectId) return;
 		isCreatingDataset = true;
+		createDatasetError = '';
 		try {
-			const response = await fetch(`${apiBase}/projects/${selectedProjectId}/datasets`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					name: newDatasetName.trim(),
-					source: newDatasetSource.trim()
-				})
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/datasets`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: newDatasetName, source: newDatasetSource })
 			});
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			newDatasetName = "";
-			newDatasetSource = "";
-			await loadDatasets(selectedProjectId);
-		} catch (err) {
-			createDatasetError =
-				err instanceof Error ? err.message : "Failed to create dataset";
+			if (!res.ok) throw new Error('Failed to create dataset');
+			const dataset = await res.json();
+			datasets = [...datasets, dataset];
+			newDatasetName = '';
+			newDatasetSource = '';
+		} catch (e) {
+			createDatasetError = (e as Error).message;
 		} finally {
 			isCreatingDataset = false;
 		}
-	};
+	}
 
-	const deleteDataset = async (datasetId: string) => {
-		if (!selectedProjectId) {
-			datasetActionError = "Select a project first.";
-			return;
-		}
-		datasetActionError = "";
+	async function deleteDataset(datasetId: string) {
+		if (!confirm('Delete dataset?')) return;
 		deletingDatasetId = datasetId;
+		datasetActionError = '';
 		try {
-			const response = await fetch(
-				`${apiBase}/projects/${selectedProjectId}/datasets/${datasetId}`,
-				{ method: "DELETE" }
-			);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			if (selectedDatasetId === datasetId) {
-				selectedDatasetId = "";
-			}
-			await loadDatasets(selectedProjectId);
-			await loadRuns(selectedProjectId);
-			await loadArtifacts(selectedProjectId);
-		} catch (err) {
-			datasetActionError =
-				err instanceof Error ? err.message : "Failed to delete dataset";
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/datasets/${datasetId}`, {
+				method: 'DELETE'
+			});
+			if (!res.ok) throw new Error('Failed to delete dataset');
+			datasets = datasets.filter((d) => d.id !== datasetId);
+			if (selectedDatasetId === datasetId) selectedDatasetId = '';
+		} catch (e) {
+			datasetActionError = (e as Error).message;
 		} finally {
-			deletingDatasetId = "";
+			deletingDatasetId = '';
 		}
-	};
+	}
 
-	const previewDataset = async () => {
-		if (!selectedProjectId || !selectedDatasetId) {
-			datasetPreviewError = "Select a dataset first.";
-			return;
-		}
+	function selectDataset(datasetId: string) {
+		selectedDatasetId = datasetId;
+	}
+
+	async function previewDataset() {
+		if (!selectedDatasetId || !selectedProjectId) return;
 		datasetPreviewLoading = true;
-		datasetPreviewError = "";
-		datasetPreviewContent = "";
+		datasetPreviewError = '';
+		datasetPreviewContent = '';
 		try {
-			const response = await fetch(
+			const datasetSource = selectedDataset?.source ?? '';
+			const sourceLower = datasetSource.toLowerCase();
+			if (datasetSource && !sourceLower.endsWith('.csv')) {
+				datasetPreviewError = 'Preview is only available for CSV datasets.';
+				return;
+			}
+			const res = await fetch(
 				`${apiBase}/projects/${selectedProjectId}/datasets/${selectedDatasetId}/preview`
 			);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			const payload = await response.json();
+			if (!res.ok) throw new Error('Preview not available');
+			const payload = await res.json();
 			datasetPreviewContent = JSON.stringify(payload, null, 2);
-		} catch (err) {
-			datasetPreviewError =
-				err instanceof Error ? err.message : "Preview failed";
+		} catch (e) {
+			datasetPreviewError = (e as Error).message;
 		} finally {
 			datasetPreviewLoading = false;
 		}
-	};
+	}
 
-	const selectDataset = (datasetId: string) => {
-		selectedDatasetId = datasetId;
-	};
-
-	const createRun = async () => {
-		runMessage = "";
-		runError = "";
-		runActionError = "";
-		if (!selectedProjectId || !selectedDatasetId) {
-			runError = "Select a project and dataset.";
-			return;
-		}
-		isRunning = true;
+	// Runs
+	async function loadRuns() {
+		if (!selectedProjectId) return;
+		runsLoading = true;
+		runsError = '';
 		try {
-			const response = await fetch(`${apiBase}/projects/${selectedProjectId}/runs`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/runs`);
+			if (!res.ok) throw new Error('Failed to fetch runs');
+			runs = await res.json();
+		} catch (e) {
+			runsError = (e as Error).message;
+		} finally {
+			runsLoading = false;
+		}
+	}
+
+	async function createRun() {
+		if (!selectedDatasetId || !selectedProjectId) return;
+		isRunning = true;
+		runError = '';
+		try {
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/runs`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ dataset_id: selectedDatasetId, type: runType })
 			});
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			runMessage = "Run completed (stub).";
-			await loadRuns(selectedProjectId);
-			await loadArtifacts(selectedProjectId, selectedRunId || undefined);
-			await loadDatasets(selectedProjectId);
-		} catch (err) {
-			runError = err instanceof Error ? err.message : "Run failed";
+			if (!res.ok) throw new Error('Failed to start run');
+			const run = await res.json();
+			runs = [run, ...runs];
+			runMessage = `Started ${runType} run`;
+			pollRun(run.id);
+		} catch (e) {
+			runError = (e as Error).message;
 		} finally {
 			isRunning = false;
 		}
-	};
+	}
 
-	const deleteRun = async (runId: string) => {
-		if (!selectedProjectId) {
-			runActionError = "Select a project first.";
-			return;
-		}
-		runActionError = "";
-		deletingRunId = runId;
-		try {
-			const response = await fetch(
-				`${apiBase}/projects/${selectedProjectId}/runs/${runId}`,
-				{ method: "DELETE" }
-			);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			if (selectedRunId === runId) {
-				selectedRunId = "";
-				previewArtifactId = "";
-				previewContent = "";
-				previewError = "";
-			}
-			await loadRuns(selectedProjectId);
-			await loadArtifacts(selectedProjectId, selectedRunId || undefined);
-		} catch (err) {
-			runActionError = err instanceof Error ? err.message : "Failed to delete run";
-		} finally {
-			deletingRunId = "";
-		}
-	};
-
-	const datasetNameById = (datasetId: string) => {
-		const dataset = datasets.find((item) => item.id === datasetId);
-		return dataset ? dataset.name : datasetId;
-	};
-
-	const datasetById = (datasetId: string) => datasets.find((item) => item.id === datasetId);
-
-	const latestRunForDataset = (datasetId: string) => {
-		const datasetRuns = runs.filter((run) => run.dataset_id === datasetId);
-		if (!datasetRuns.length) {
-			return null;
-		}
-		return datasetRuns.reduce((latest, current) =>
-			new Date(current.started_at).getTime() > new Date(latest.started_at).getTime()
-				? current
-				: latest
-		);
-	};
-
-	const runById = (runId: string) => runs.find((item) => item.id === runId);
-
-	$: filteredRuns = runs.filter((run) => {
-		const matchesType = runTypeFilter === "all" || run.type === runTypeFilter;
-		const haystack = `${run.type} ${run.status} ${run.dataset_id}`.toLowerCase();
-		const matchesSearch = !runSearch.trim() || haystack.includes(runSearch.trim().toLowerCase());
-		return matchesType && matchesSearch;
-	});
-
-	$: selectedRunArtifacts = selectedRunId ? artifacts : [];
-	$: selectedRunArtifactTypes = Array.from(
-		new Set(selectedRunArtifacts.map((item) => item.type))
-	).sort();
-
-	$: artifactTypes = Array.from(new Set(artifacts.map((item) => item.type))).sort();
-	$: filteredArtifacts = artifacts.filter((artifact) => {
-		const matchesType = artifactTypeFilter === "all" || artifact.type === artifactTypeFilter;
-		const haystack = `${artifact.type} ${artifact.path} ${artifact.run_id}`.toLowerCase();
-		const matchesSearch = !artifactSearch.trim() || haystack.includes(artifactSearch.trim().toLowerCase());
-		return matchesType && matchesSearch;
-	});
-
-	const selectRun = async (runId: string) => {
-		selectedRunId = runId;
-		previewArtifactId = "";
-		previewContent = "";
-		previewError = "";
-		if (selectedProjectId) {
-			await loadArtifacts(selectedProjectId, runId);
-		}
-	};
-
-	const clearRunFilter = async () => {
-		selectedRunId = "";
-		previewArtifactId = "";
-		previewContent = "";
-		previewError = "";
-		if (selectedProjectId) {
-			await loadArtifacts(selectedProjectId);
-		}
-	};
-
-	const rerunSelected = async () => {
-		if (!selectedRunId) {
-			return;
-		}
-		const run = runById(selectedRunId);
-		if (!run) {
-			return;
-		}
-		selectedDatasetId = run.dataset_id;
-		runType = run.type;
-		await createRun();
-	};
-
-	const previewArtifact = async (artifactId: string) => {
-		if (!selectedProjectId) {
-			previewError = "Select a project first.";
-			return;
-		}
-		previewLoading = true;
-		previewError = "";
-		previewContent = "";
-		previewArtifactId = artifactId;
-		try {
-			const response = await fetch(
-				`${apiBase}/projects/${selectedProjectId}/artifacts/${artifactId}/download`
-			);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			const contentType = response.headers.get("content-type") ?? "";
-			const text = await response.text();
-			if (contentType.includes("application/json")) {
-				try {
-					previewContent = JSON.stringify(JSON.parse(text), null, 2);
-				} catch {
-					previewContent = text;
+	async function pollRun(runId: string) {
+		const interval = setInterval(async () => {
+			try {
+				const res = await fetch(
+					`${apiBase}/projects/${selectedProjectId}/runs/${runId}`
+				);
+				if (res.ok) {
+					const updated = await res.json();
+					runs = runs.map((r) => (r.id === runId ? updated : r));
+					if (updated.status === 'completed' || updated.status === 'failed') {
+						clearInterval(interval);
+						if (updated.status === 'completed') {
+							// Refresh artifacts if this run is selected
+							if (selectedRunId === runId) loadArtifacts(runId);
+						}
+					}
 				}
-			} else {
-				previewContent = text.slice(0, 4000);
+			} catch {
+				clearInterval(interval);
 			}
-		} catch (err) {
-			previewError = err instanceof Error ? err.message : "Preview failed";
+		}, 1000);
+	}
+
+	async function deleteRun(runId: string) {
+		if (!confirm('Delete run?')) return;
+		deletingRunId = runId;
+		runActionError = '';
+		try {
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/runs/${runId}`, {
+				method: 'DELETE'
+			});
+			if (!res.ok) throw new Error('Failed to delete run');
+			runs = runs.filter((r) => r.id !== runId);
+			if (selectedRunId === runId) selectedRunId = '';
+		} catch (e) {
+			runActionError = (e as Error).message;
+		} finally {
+			deletingRunId = '';
+		}
+	}
+
+	function selectRun(runId: string) {
+		selectedRunId = runId;
+		loadArtifacts(runId);
+	}
+
+	// Artifacts
+	async function loadArtifacts(runId: string) {
+		if (!selectedProjectId) return;
+		artifactsLoading = true;
+		artifactsError = '';
+		selectedRunArtifacts = [];
+		try {
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/artifacts`);
+			if (!res.ok) throw new Error('Failed to fetch artifacts');
+			const all = await res.json();
+			selectedRunArtifacts = all.filter((a: Artifact) => a.run_id === runId);
+		} catch (e) {
+			artifactsError = (e as Error).message;
+		} finally {
+			artifactsLoading = false;
+		}
+	}
+
+	async function onPreviewArtifact(artifactId: string) {
+		previewArtifactId = artifactId;
+		previewLoading = true;
+		try {
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/artifacts/${artifactId}/download`);
+			if(res.ok) {
+				const text = await res.text();
+				previewContent = text;
+			}
+		} catch(e) {
+			previewError = (e as Error).message;
 		} finally {
 			previewLoading = false;
 		}
-	};
+	}
 
-	const deleteArtifact = async (artifactId: string) => {
-		if (!selectedProjectId) {
-			artifactActionError = "Select a project first.";
-			return;
-		}
-		artifactActionError = "";
+	async function deleteArtifact(artifactId: string) {
+		if(!confirm("Delete this artifact?")) return;
 		deletingArtifactId = artifactId;
 		try {
-			const response = await fetch(
-				`${apiBase}/projects/${selectedProjectId}/artifacts/${artifactId}`,
-				{ method: "DELETE" }
-			);
-			if (!response.ok) {
-				throw new Error(`API error: ${response.status}`);
-			}
-			await loadArtifacts(selectedProjectId, selectedRunId || undefined);
-		} catch (err) {
-			artifactActionError =
-				err instanceof Error ? err.message : "Failed to delete artifact";
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/artifacts/${artifactId}`, { method: 'DELETE' });
+			if(!res.ok) throw new Error("Delete failed");
+			selectedRunArtifacts = selectedRunArtifacts.filter(a => a.id !== artifactId);
+		} catch(e) {
+			artifactActionError = (e as Error).message;
 		} finally {
-			deletingArtifactId = "";
+			deletingArtifactId = '';
 		}
-	};
+	}
+
+	function clearRunSelection() {
+		selectedRunId = '';
+		selectedRunArtifacts = [];
+	}
+
+	async function rerunSelected() {
+		if (!selectedRun) return;
+		runType = selectedRun.type as any;
+		selectedDatasetId = selectedRun.dataset_id;
+		await createRun();
+	}
 </script>
 
-<main class="page">
-	<section class="hero">
-		<p class="eyebrow">data-analyst</p>
-		<h1>Control plane</h1>
-		<p class="lede">
-			Manage projects, datasets, runs, and reports from a single place.
-		</p>
-	</section>
+<div class="layout">
+	<div class="sidebar">
+		<ProjectsCard
+			{projects}
+			{loading}
+			{error}
+			{createError}
+			{projectActionError}
+			bind:newProjectName
+			{isCreating}
+			{deletingProjectId}
+			{selectedProjectId}
+			onCreate={createProject}
+			onDelete={deleteProject}
+			onSelect={selectProject}
+		/>
+	</div>
+	<div class="main">
+		{#if selectedProjectId}
+			<DatasetsCard
+				{projects}
+				bind:selectedProjectId
+				{datasets}
+				{datasetsLoading}
+				{datasetError}
+				{uploadError}
+				{uploadMessage}
+				{isUploading}
+				bind:newDatasetName
+				bind:newDatasetSource
+				{isCreatingDataset}
+				{createDatasetError}
+				{datasetActionError}
+				{deletingDatasetId}
+				bind:selectedDatasetId
+				onProjectChange={(id) => selectProject(id)}
+				onUpload={ingestFile}
+				onCreateDataset={createDataset}
+				onDeleteDataset={deleteDataset}
+				onSelectDataset={selectDataset}
+				onFileChange={(file) => { uploaderInput = file; }}
+				{latestRunForDataset}
+			/>
 
-	<section class="grid">
-		<div class="card">
-			<h2>Projects</h2>
-			<p>Create isolated workspaces and environments.</p>
-			<div class="form">
-				<input
-					placeholder="Project name"
-					bind:value={newProjectName}
-					disabled={isCreating}
+			{#if selectedDatasetId}
+				<DatasetDetailCard
+					{selectedProjectId}
+					{selectedDatasetId}
+					dataset={selectedDataset}
+					{datasetPreviewLoading}
+					{datasetPreviewError}
+					{datasetPreviewContent}
+					onPreview={previewDataset}
+					{apiBase}
 				/>
-				<button on:click={createProject} disabled={isCreating}>
-					{isCreating ? "Creating…" : "Create"}
-				</button>
-			</div>
-			{#if createError}
-				<p class="error">{createError}</p>
 			{/if}
-			{#if loading}
-				<p class="muted">Loading projects…</p>
-			{:else if error}
-				<p class="error">{error}</p>
-						<span>
-							Duplicate rows: {datasetById(selectedDatasetId)?.stats?.duplicate_row_count ?? "—"}
-						</span>
-			{:else if projects.length === 0}
-				<p class="muted">No projects yet.</p>
-				{#if datasetById(selectedDatasetId)?.stats?.missing_by_column}
-					<ul>
-						{#each Object.entries(datasetById(selectedDatasetId)?.stats?.missing_by_column ?? {}) as [name, count]}
-							<li>
-								<strong>{name}</strong>
-								<span>Missing: {count}</span>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			{:else}
-				<ul>
-					{#each projects as project}
-						<li>
-							<strong>{project.name}</strong>
-							<span>{project.workspace_path}</span>
-							<button
-								class="danger"
-								on:click={() => deleteProject(project.id)}
-								disabled={deletingProjectId === project.id}
-							>
-								{deletingProjectId === project.id ? "Deleting…" : "Delete"}
-							</button>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-			{#if projectActionError}
-				<p class="error">{projectActionError}</p>
-			{/if}
-		</div>
-		<div class="card">
-			<h2>Datasets</h2>
-			<p>Track ingestion sources, profiling, and quality checks.</p>
-			<div class="form">
-				<select bind:value={selectedProjectId} disabled={isUploading} on:change={(event) => handleProjectSelection((event.target as HTMLSelectElement).value)}>
-					<option value="">Select project</option>
-					{#each projects as project}
-						<option value={project.id}>{project.name}</option>
-					{/each}
-				</select>
-				<input
-					type="file"
-					on:change={(event) => {
-						const target = event.currentTarget as HTMLInputElement;
-						uploadFile = target.files ? target.files[0] : null;
-					}}
-					disabled={isUploading}
-				/>
-				<button on:click={uploadDataset} disabled={isUploading}>
-					{isUploading ? "Uploading…" : "Upload"}
-				</button>
-			</div>
-			<div class="form">
-				<input
-					placeholder="Dataset name"
-					bind:value={newDatasetName}
-					disabled={isCreatingDataset}
-				/>
-				<input
-					placeholder="Source path or URL"
-					bind:value={newDatasetSource}
-					disabled={isCreatingDataset}
-				/>
-				<button on:click={createDataset} disabled={isCreatingDataset}>
-					{isCreatingDataset ? "Saving…" : "Add source"}
-				</button>
-			</div>
-			{#if datasetsLoading}
-				<p class="muted">Loading datasets…</p>
-			{:else if datasetError}
-				<p class="error">{datasetError}</p>
-			{:else if selectedProjectId && datasets.length === 0}
-				<p class="muted">No datasets yet.</p>
-			{:else if datasets.length > 0}
-				<ul>
-					{#each datasets as dataset}
-						<li>
-							<strong>{dataset.name}</strong>
-							<span>{dataset.source}</span>
-							{#if dataset.stats}
-								<span>Rows: {dataset.stats.row_count ?? "—"}</span>
-								<span>Columns: {dataset.stats.column_count ?? "—"}</span>
-							{/if}
-							{#if dataset.schema_snapshot?.columns?.length}
-								<span>
-									Columns: {dataset.schema_snapshot.columns.map((col) => col.name).join(", ")}
-								</span>
-							{/if}
-							{#if latestRunForDataset(dataset.id)}
-								<span>
-									Last run: {latestRunForDataset(dataset.id)?.type} · {latestRunForDataset(dataset.id)?.status}
-								</span>
-							{/if}
-							<button
-								class="secondary"
-								on:click={() => selectDataset(dataset.id)}
-								disabled={selectedDatasetId === dataset.id}
-							>
-								{selectedDatasetId === dataset.id ? "Selected" : "View"}
-							</button>
-							<button
-								class="danger"
-								on:click={() => deleteDataset(dataset.id)}
-								disabled={deletingDatasetId === dataset.id}
-							>
-								{deletingDatasetId === dataset.id ? "Deleting…" : "Delete"}
-							</button>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-			{#if uploadError}
-				<p class="error">{uploadError}</p>
-			{/if}
-			{#if uploadMessage}
-				<p class="success">{uploadMessage}</p>
-			{/if}
-			{#if createDatasetError}
-				<p class="error">{createDatasetError}</p>
-			{/if}
-			{#if datasetActionError}
-				<p class="error">{datasetActionError}</p>
-			{/if}
-		</div>
-		<div class="card">
-			<h2>Runs</h2>
-			<p>Monitor profiling, analysis, and report runs.</p>
-			<div class="form">
-				<select bind:value={selectedDatasetId} disabled={isRunning}>
-					<option value="">Select dataset</option>
-					{#each datasets as dataset}
-						<option value={dataset.id}>{dataset.name}</option>
-					{/each}
-				</select>
-				<select bind:value={runType} disabled={isRunning}>
-					<option value="ingest">ingest</option>
-					<option value="profile">profile</option>
-					<option value="analysis">analysis</option>
-					<option value="report">report</option>
-				</select>
-				<button on:click={createRun} disabled={isRunning}>
-					{isRunning ? "Queueing…" : "Queue run"}
-				</button>
-			</div>
-			<div class="form">
-				<select bind:value={runTypeFilter}>
-					<option value="all">All types</option>
-					<option value="ingest">ingest</option>
-					<option value="profile">profile</option>
-					<option value="analysis">analysis</option>
-					<option value="report">report</option>
-				</select>
-				<input
-					placeholder="Search runs"
-					bind:value={runSearch}
-				/>
-			</div>
-			{#if runError}
-				<p class="error">{runError}</p>
-			{/if}
-			{#if runMessage}
-				<p class="success">{runMessage}</p>
-			{/if}
-			{#if runActionError}
-				<p class="error">{runActionError}</p>
-			{/if}
-			{#if runsLoading}
-				<p class="muted">Loading runs…</p>
-			{:else if runsError}
-				<p class="error">{runsError}</p>
-			{:else if selectedProjectId && runs.length === 0}
-				<p class="muted">No runs yet.</p>
-			{:else if filteredRuns.length === 0}
-				<p class="muted">No runs match the filters.</p>
-			{:else if filteredRuns.length > 0}
-				<ul>
-					{#each filteredRuns as run}
-						<li>
-							<strong>{run.type} · {run.status}</strong>
-							<span>Dataset: {datasetNameById(run.dataset_id)}</span>
-							<span>Started: {new Date(run.started_at).toLocaleString()}</span>
-							{#if run.finished_at}
-								<span>Finished: {new Date(run.finished_at).toLocaleString()}</span>
-							{/if}
-							<button
-								class="secondary"
-								on:click={() => selectRun(run.id)}
-								disabled={selectedRunId === run.id}
-							>
-								{selectedRunId === run.id ? "Selected" : "View"}
-							</button>
-							<button
-								class="danger"
-								on:click={() => deleteRun(run.id)}
-								disabled={deletingRunId === run.id}
-							>
-								{deletingRunId === run.id ? "Deleting…" : "Delete"}
-							</button>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</div>
-		<div class="card">
-			<h2>Dataset detail</h2>
-			<p>Review schema and basic stats.</p>
-			{#if !selectedDatasetId}
-				<p class="muted">Select a dataset to see details.</p>
-			{:else if !datasetById(selectedDatasetId)}
-				<p class="muted">Dataset not found.</p>
-			{:else}
-				<div class="summary">
-					<strong>{datasetById(selectedDatasetId)?.name}</strong>
-					<span>Source: {datasetById(selectedDatasetId)?.source}</span>
-					{#if selectedProjectId}
-						<a
-							class="link"
-							href={`${apiBase}/projects/${selectedProjectId}/datasets/${selectedDatasetId}/download`}
-							target="_blank"
-							rel="noreferrer"
-						>
-							Download dataset
-						</a>
-					{/if}
-					{#if datasetById(selectedDatasetId)?.stats}
-						<span>Rows: {datasetById(selectedDatasetId)?.stats?.row_count ?? "—"}</span>
-						<span>Columns: {datasetById(selectedDatasetId)?.stats?.column_count ?? "—"}</span>
-						<span>File size: {datasetById(selectedDatasetId)?.stats?.file_size_bytes ?? "—"} bytes</span>
-					{/if}
-					<button class="secondary" on:click={previewDataset} disabled={datasetPreviewLoading}>
-						{datasetPreviewLoading ? "Loading…" : "Preview"}
-					</button>
-				</div>
-				{#if datasetPreviewError}
-					<p class="error">{datasetPreviewError}</p>
-				{/if}
-				{#if datasetPreviewContent}
-					<pre class="preview">{datasetPreviewContent}</pre>
-				{/if}
-				{#if datasetById(selectedDatasetId)?.schema_snapshot?.columns?.length}
-					<ul>
-						{#each datasetById(selectedDatasetId)?.schema_snapshot?.columns ?? [] as column}
-							<li>
-								<strong>{column.name}</strong>
-								<span>Index: {column.index}</span>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			{/if}
-		</div>
-		<div class="card">
-			<h2>Reports</h2>
-			<p>Publish markdown, HTML, and PDF outputs.</p>
-			<div class="form">
-				{#if selectedRunId}
-					<span class="tag">Filtered by run: {selectedRunId}</span>
-					<button class="secondary" on:click={clearRunFilter}>Show all</button>
-				{/if}
-			</div>
-			<div class="form">
-				<select bind:value={artifactTypeFilter}>
-					<option value="all">All types</option>
-					{#each artifactTypes as type}
-						<option value={type}>{type}</option>
-					{/each}
-				</select>
-				<input
-					placeholder="Search artifacts"
-					bind:value={artifactSearch}
-				/>
-			</div>
+
+			<RunsCard
+				{datasets}
+				bind:selectedDatasetId
+				bind:runType
+				bind:runTypeFilter
+				bind:runSearch
+				runs={runs}
+				{filteredRuns}
+				{runsLoading}
+				{runsError}
+				{runError}
+				{runMessage}
+				{runActionError}
+				{isRunning}
+				{deletingRunId}
+				{selectedProjectId}
+				{selectedRunId}
+				onCreateRun={createRun}
+				onSelectRun={selectRun}
+				onDeleteRun={deleteRun}
+				{datasetNameById}
+			/>
+
 			{#if selectedRunId}
-				{#if runById(selectedRunId)}
-					<div class="summary">
-						<strong>Run details</strong>
-						<span>Type: {runById(selectedRunId)?.type}</span>
-						<span>Status: {runById(selectedRunId)?.status}</span>
-						<span>Dataset: {datasetNameById(runById(selectedRunId)?.dataset_id ?? "")}</span>
-						{#if selectedRunArtifacts.length}
-							<span>Artifacts: {selectedRunArtifacts.length}</span>
-							<span>Types: {selectedRunArtifactTypes.join(", ")}</span>
-						{/if}
-						<button class="secondary" on:click={rerunSelected}>Re-run</button>
-					</div>
-				{/if}
+				<ReportsCard
+					{selectedProjectId}
+					{selectedRunId}
+					run={selectedRun}
+					{selectedRunArtifacts}
+					{selectedRunArtifactTypes}
+					{artifactsLoading}
+					{artifactsError}
+					{artifactActionError}
+					{filteredArtifacts}
+					{artifactTypes}
+					bind:artifactTypeFilter
+					bind:artifactSearch
+					{previewError}
+					{previewContent}
+					{previewLoading}
+					{previewArtifactId}
+					{deletingArtifactId}
+					{apiBase}
+					onPreviewArtifact={onPreviewArtifact}
+					onDeleteArtifact={deleteArtifact}
+					onClearRunFilter={clearRunSelection}
+					onRerunSelected={rerunSelected}
+				/>
 			{/if}
-			{#if artifactsLoading}
-				<p class="muted">Loading artifacts…</p>
-			{:else if artifactsError}
-				<p class="error">{artifactsError}</p>
-			{:else if selectedProjectId && artifacts.length === 0}
-				<p class="muted">No artifacts yet.</p>
-			{:else if filteredArtifacts.length === 0}
-				<p class="muted">No artifacts match the filters.</p>
-			{:else if filteredArtifacts.length > 0}
-				<ul>
-					{#each filteredArtifacts as artifact}
-						<li>
-							<strong>{artifact.type}</strong>
-							<span>Run: {artifact.run_id}</span>
-							<span>{artifact.path}</span>
-							<span>Type: {artifact.mime_type}</span>
-							<span>Size: {artifact.size} bytes</span>
-							{#if selectedProjectId}
-								<a
-									class="link"
-									href={`${apiBase}/projects/${selectedProjectId}/artifacts/${artifact.id}/download`}
-									target="_blank"
-									rel="noreferrer"
-								>
-									Download
-								</a>
-								<button
-									class="secondary"
-									on:click={() => previewArtifact(artifact.id)}
-									disabled={previewLoading && previewArtifactId === artifact.id}
-								>
-									{previewLoading && previewArtifactId === artifact.id
-										? "Loading…"
-										: "Preview"}
-								</button>
-								<button
-									class="danger"
-									on:click={() => deleteArtifact(artifact.id)}
-									disabled={deletingArtifactId === artifact.id}
-								>
-									{deletingArtifactId === artifact.id ? "Deleting…" : "Delete"}
-								</button>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			{/if}
-			{#if previewError}
-				<p class="error">{previewError}</p>
-			{/if}
-			{#if previewContent}
-				<pre class="preview">{previewContent}</pre>
-			{/if}
-			{#if artifactActionError}
-				<p class="error">{artifactActionError}</p>
-			{/if}
-		</div>
-	</section>
-</main>
+		{:else}
+			<div class="welcome">
+				<h2>Welcome to Data Analyst</h2>
+				<p>Select or create a project to get started.</p>
+			</div>
+		{/if}
+	</div>
+</div>
 
 <style>
 	:global(body) {
+		font-family: system-ui, -apple-system, sans-serif;
 		margin: 0;
-		font-family: "Inter", system-ui, sans-serif;
-		color: #0f172a;
-		background: #f8fafc;
-	}
-
-	.page {
-		min-height: 100vh;
-		padding: 64px 8vw;
-		display: grid;
-		gap: 48px;
-	}
-
-	.hero {
-		display: grid;
-		gap: 16px;
-	}
-
-	.eyebrow {
-		text-transform: uppercase;
-		letter-spacing: 0.14em;
-		font-size: 12px;
-		color: #64748b;
-	}
-
-	.lede {
-		font-size: 18px;
-		color: #475569;
-		max-width: 640px;
-	}
-
-	.grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 20px;
-	}
-
-	.card {
-		background: white;
-		border-radius: 16px;
 		padding: 20px;
-		box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-		border: 1px solid #e2e8f0;
+		background: #f4f4f5;
+		color: #18181b;
 	}
-
-	.card h2 {
-		margin: 0 0 8px;
-		font-size: 18px;
-	}
-
-	.card p {
-		margin: 0;
-		color: #64748b;
-	}
-
-	.form {
-		margin-top: 16px;
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
-	}
-
-	.form input {
-		flex: 1 1 180px;
-		padding: 10px 12px;
-		border-radius: 10px;
-		border: 1px solid #cbd5f5;
-		font-size: 14px;
-	}
-
-	.form select {
-		flex: 1 1 140px;
-		padding: 10px 12px;
-		border-radius: 10px;
-		border: 1px solid #cbd5f5;
-		font-size: 14px;
-		background: white;
-	}
-
-	.form button {
-		padding: 10px 16px;
-		border-radius: 10px;
-		border: none;
-		background: #1e293b;
-		color: white;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.secondary {
-		padding: 6px 10px;
-		border-radius: 8px;
-		border: 1px solid #cbd5f5;
-		background: #ffffff;
-		color: #1e293b;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.tag {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 4px 8px;
-		border-radius: 999px;
-		background: #e2e8f0;
-		color: #475569;
-		font-size: 12px;
-	}
-
-	.danger {
-		align-self: flex-start;
-		padding: 6px 10px;
-		border-radius: 8px;
-		border: 1px solid #fecaca;
-		background: #fee2e2;
-		color: #b91c1c;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
-	.danger:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.form button:disabled,
-	.form input:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.card ul {
-		list-style: none;
-		padding: 0;
-		margin: 12px 0 0;
+	.layout {
 		display: grid;
-		gap: 8px;
+		grid-template-columns: 320px 1fr;
+		gap: 24px;
+		max-width: 1400px;
+		margin: 0 auto;
 	}
-
-	.card li {
+	.sidebar {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
-		padding: 10px 12px;
-		border-radius: 12px;
-		background: #f1f5f9;
-		font-size: 13px;
+		gap: 24px;
 	}
-
-	.card li span {
-		color: #64748b;
-		word-break: break-all;
+	.main {
+		display: flex;
+		flex-direction: column;
+		gap: 24px;
 	}
-
-	.link {
-		color: #2563eb;
-		font-weight: 600;
-		text-decoration: none;
+	.welcome {
+		text-align: center;
+		padding: 60px;
+		background: white;
+		border-radius: 8px;
+		border: 1px dashed #e4e4e7;
+		color: #71717a;
 	}
-
-	.link:hover {
-		text-decoration: underline;
+	/* Shared Component Styles */
+	:global(.card) { 
+		background: white; 
+		border: 1px solid #e4e4e7; 
+		border-radius: 8px; 
+		padding: 24px; 
+		display: flex; 
+		flex-direction: column; 
+		gap: 16px; 
+		box-shadow: 0 1px 2px rgba(0,0,0,0.05); 
 	}
-
-	.preview {
-		margin-top: 12px;
-		padding: 12px;
-		border-radius: 12px;
-		background: #0f172a;
-		color: #e2e8f0;
-		font-size: 12px;
-		max-height: 240px;
-		overflow: auto;
-	}
-
-	.summary {
-		margin-top: 12px;
-		padding: 10px 12px;
-		border-radius: 12px;
-		background: #f8fafc;
-		border: 1px solid #e2e8f0;
-		display: grid;
-		gap: 6px;
-		font-size: 13px;
-		color: #334155;
-	}
-
-	.muted {
-		margin-top: 12px;
-		color: #94a3b8;
-		font-size: 13px;
-	}
-
-	.error {
-		margin-top: 12px;
-		color: #dc2626;
-		font-size: 13px;
-	}
-
-	.success {
-		margin-top: 12px;
-		color: #16a34a;
-		font-size: 13px;
-	}
+	:global(.card__header h2) { margin: 0; font-size: 18px; font-weight: 600; }
+	:global(.card__header p) { margin: 4px 0 0; color: #71717a; font-size: 14px; }
+	:global(.form) { display: flex; gap: 8px; flex-wrap: wrap; }
+	:global(.form input), :global(.form select) { flex: 1; padding: 8px 12px; border: 1px solid #e4e4e7; border-radius: 6px; font-size: 14px; min-width: 200px; }
+	:global(.form button) { padding: 8px 16px; border-radius: 6px; font-weight: 500; cursor: pointer; background: #18181b; color: white; border: none; flex-shrink: 0; }
+	:global(.form button:disabled) { opacity: 0.5; cursor: not-allowed; }
+	:global(.error) { color: #ef4444; font-size: 14px; margin: 0; }
+	:global(.muted) { color: #71717a; font-size: 14px; margin: 0; }
+	:global(.card ul) { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+	:global(.card ul li) { padding: 12px; border: 1px solid #f4f4f5; border-radius: 8px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+	:global(.card ul li:last-child) { border-bottom: none; }
+	:global(.card ul li strong) { display: block; font-size: 14px; }
+	:global(.card ul li span) { display: block; font-size: 12px; color: #71717a; margin-top: 2px; word-break: break-all; overflow-wrap: anywhere; }
+	:global(.card ul li .actions) { margin-left: auto; flex-shrink: 0; }
+	:global(button.danger) { background: #fee2e2; color: #ef4444; }
+	:global(button.danger:hover) { background: #fecaca; }
+	:global(.link) { color: #2563eb; text-decoration: none; font-size: 14px; }
+	:global(.link:hover) { text-decoration: underline; }
+	:global(.actions) { display: flex; gap: 8px; align-items: center; }
+	:global(li.selected) { background: #f4f4f5; border-radius: 6px; }
+	:global(.summary) { font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+	:global(.tag) { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 500; background: #f4f4f5; color: #52525b; text-transform: uppercase; }
+	:global(.tag.success) { background: #dcfce7; color: #15803d; }
+	:global(.tag.failure) { background: #fee2e2; color: #b91c1c; }
+	:global(.tag.running) { background: #e0f2fe; color: #0369a1; }
 </style>

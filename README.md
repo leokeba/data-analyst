@@ -240,6 +240,7 @@ data-analyst/
 5. Add production-ready build steps for web + API.
 
 ## Roadmap
+Status: v0.2 kickoff (2026-01-19)
 **v0.1 (MVP)**
 - Local filesystem storage.
 - Single‑node execution.
@@ -262,6 +263,7 @@ data-analyst/
 - Improved metadata (lineage, glossary, owners).
 - Incremental ingestion + dataset versioning.
 - AuthN/AuthZ, multi‑user project access.
+- Control plane UX polish (pagination, preview tables, modular UI).
 
 **v0.3**
 - Job queue + workers (Celery/RQ).
