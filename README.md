@@ -233,10 +233,10 @@ data-analyst/
 ```
 
 ## Next steps
-1. Add run detail + artifact preview/download UX.
-2. Add basic report generation (Markdown + HTML).
-3. Add simple run logs and status transitions.
-4. Add minimal tests for API CRUD + run stub.
+1. Add dataset preview table UI (render preview rows).
+2. Add pagination controls in UI for projects/datasets/runs/artifacts.
+3. Add report styling and richer markdown sections.
+4. Add artifact delete confirmation UX.
 5. Add production-ready build steps for web + API.
 
 ## Roadmap
@@ -250,6 +250,10 @@ data-analyst/
 - Artifact download endpoint + UI links.
 - Run log artifacts and report Markdown/HTML outputs.
 - Artifact filtering + preview UX.
+- Dataset preview endpoint + download support.
+- Artifact delete endpoint + UI action.
+- Pagination on list endpoints + uniform error payloads.
+- Profiling stats: missing values and duplicate rows.
 - CRUD cleanup for datasets/runs/projects + workspace files.
 - API smoke tests (pytest).
 
