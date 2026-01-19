@@ -18,6 +18,11 @@
 	let newProjectName = "";
 	let isCreating = false;
 	let createError = "";
+	let selectedProjectId = "";
+	let uploadFile: File | null = null;
+	let uploadError = "";
+	let uploadMessage = "";
+	let isUploading = false;
 
 	const apiBase = "http://localhost:8000";
 
@@ -63,6 +68,40 @@
 			createError = err instanceof Error ? err.message : "Failed to create project";
 		} finally {
 			isCreating = false;
+		}
+	};
+
+	const uploadDataset = async () => {
+		uploadError = "";
+		uploadMessage = "";
+		if (!selectedProjectId) {
+			uploadError = "Select a project first.";
+			return;
+		}
+		if (!uploadFile) {
+			uploadError = "Choose a file to upload.";
+			return;
+		}
+		isUploading = true;
+		try {
+			const formData = new FormData();
+			formData.append("file", uploadFile);
+			const response = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/datasets/upload`,
+				{
+					method: "POST",
+					body: formData
+				}
+			);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			uploadMessage = "Dataset uploaded.";
+			uploadFile = null;
+		} catch (err) {
+			uploadError = err instanceof Error ? err.message : "Upload failed";
+		} finally {
+			isUploading = false;
 		}
 	};
 </script>
@@ -113,6 +152,31 @@
 		<div class="card">
 			<h2>Datasets</h2>
 			<p>Track ingestion sources, profiling, and quality checks.</p>
+			<div class="form">
+				<select bind:value={selectedProjectId} disabled={isUploading}>
+					<option value="">Select project</option>
+					{#each projects as project}
+						<option value={project.id}>{project.name}</option>
+					{/each}
+				</select>
+				<input
+					type="file"
+					on:change={(event) => {
+						const target = event.currentTarget as HTMLInputElement;
+						uploadFile = target.files ? target.files[0] : null;
+					}}
+					disabled={isUploading}
+				/>
+				<button on:click={uploadDataset} disabled={isUploading}>
+					{isUploading ? "Uploading…" : "Upload"}
+				</button>
+			</div>
+			{#if uploadError}
+				<p class="error">{uploadError}</p>
+			{/if}
+			{#if uploadMessage}
+				<p class="success">{uploadMessage}</p>
+			{/if}
 		</div>
 		<div class="card">
 			<h2>Runs</h2>
@@ -197,6 +261,15 @@
 		font-size: 14px;
 	}
 
+	.form select {
+		flex: 1 1 140px;
+		padding: 10px 12px;
+		border-radius: 10px;
+		border: 1px solid #cbd5f5;
+		font-size: 14px;
+		background: white;
+	}
+
 	.form button {
 		padding: 10px 16px;
 		border-radius: 10px;
@@ -245,6 +318,12 @@
 	.error {
 		margin-top: 12px;
 		color: #dc2626;
+		font-size: 13px;
+	}
+
+	.success {
+		margin-top: 12px;
+		color: #16a34a;
 		font-size: 13px;
 	}
 </style>
