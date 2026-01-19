@@ -42,6 +42,9 @@
 	export let datasetActionError = "";
 	export let deletingDatasetId = "";
 	export let selectedDatasetId = "";
+	export let pageSize = 10;
+	export let pageOffset = 0;
+	export let hasNext = false;
 	export let onProjectChange: (value: string) => void;
 	export let onUpload: () => void;
 	export let onCreateDataset: () => void;
@@ -49,6 +52,12 @@
 	export let onSelectDataset: (datasetId: string) => void;
 	export let onFileChange: (file: File | null) => void;
 	export let latestRunForDataset: (datasetId: string) => Run | null;
+	export let onPrevPage: () => void;
+	export let onNextPage: () => void;
+
+	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
+	$: rangeStart = datasets.length ? pageOffset + 1 : 0;
+	$: rangeEnd = pageOffset + datasets.length;
 </script>
 
 <div class="card">
@@ -153,5 +162,20 @@
 	{/if}
 	{#if datasetActionError}
 		<p class="error">{datasetActionError}</p>
+	{/if}
+	{#if !datasetsLoading && !datasetError && datasets.length}
+		<div class="pager">
+			<span class="pager__info">
+				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}
+			</span>
+			<div class="pager__actions">
+				<button class="secondary" on:click={onPrevPage} disabled={pageOffset === 0}>
+					Previous
+				</button>
+				<button class="secondary" on:click={onNextPage} disabled={!hasNext}>
+					Next
+				</button>
+			</div>
+		</div>
 	{/if}
 </div>

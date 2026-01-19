@@ -52,6 +52,9 @@
 	let isCreating = false;
 	let deletingProjectId = '';
 	let selectedProjectId = '';
+	let projectsLimit = 10;
+	let projectsOffset = 0;
+	let projectsHasNext = false;
 
 	// State - Datasets
 	let datasets: Dataset[] = [];
@@ -72,6 +75,9 @@
 	let datasetPreviewLoading = false;
 	let datasetPreviewError = '';
 	let datasetPreviewData: { columns: string[]; rows: string[][] } | null = null;
+	let datasetsLimit = 10;
+	let datasetsOffset = 0;
+	let datasetsHasNext = false;
 
 	// State - Runs
 	let runs: Run[] = [];
@@ -87,6 +93,9 @@
 	let runType: 'ingest' | 'profile' | 'analysis' | 'report' = 'profile';
 	let runTypeFilter: 'all' | 'ingest' | 'profile' | 'analysis' | 'report' = 'all';
 	let runSearch = '';
+	let runsLimit = 10;
+	let runsOffset = 0;
+	let runsHasNext = false;
 
 	// State - Artifacts/Reports
 	let selectedRunArtifacts: Artifact[] = [];
@@ -103,6 +112,9 @@
 	let previewLoading = false;
 	let previewArtifactId = '';
 	let deletingArtifactId = '';
+	let artifactsLimit = 10;
+	let artifactsOffset = 0;
+	let artifactsHasNext = false;
 
 	// Derived
 	$: if (selectedDatasetId && datasets.length) {
@@ -157,14 +169,29 @@
 		loading = true;
 		error = '';
 		try {
-			const res = await fetch(`${apiBase}/projects`);
+			const res = await fetch(
+				`${apiBase}/projects?limit=${projectsLimit}&offset=${projectsOffset}`
+			);
 			if (!res.ok) throw new Error('Failed to fetch projects');
 			projects = await res.json();
+			projectsHasNext = projects.length === projectsLimit;
 		} catch (e) {
 			error = (e as Error).message;
 		} finally {
 			loading = false;
 		}
+	}
+
+	function nextProjectsPage() {
+		if (!projectsHasNext) return;
+		projectsOffset += projectsLimit;
+		loadProjects();
+	}
+
+	function prevProjectsPage() {
+		if (projectsOffset === 0) return;
+		projectsOffset = Math.max(0, projectsOffset - projectsLimit);
+		loadProjects();
 	}
 
 	async function createProject() {
@@ -179,8 +206,9 @@
 			});
 			if (!res.ok) throw new Error('Failed to create project');
 			const project = await res.json();
-			projects = [...projects, project];
 			newProjectName = '';
+			projectsOffset = 0;
+			await loadProjects();
 			selectProject(project.id);
 		} catch (e) {
 			createError = (e as Error).message;
@@ -196,7 +224,7 @@
 		try {
 			const res = await fetch(`${apiBase}/projects/${projectId}`, { method: 'DELETE' });
 			if (!res.ok) throw new Error('Failed to delete project');
-			projects = projects.filter((p) => p.id !== projectId);
+			await loadProjects();
 			if (selectedProjectId === projectId) {
 				selectedProjectId = '';
 				datasets = [];
@@ -216,6 +244,9 @@
 		selectedDatasetId = '';
 		selectedRunId = '';
 		selectedRunArtifacts = [];
+		datasetsOffset = 0;
+		runsOffset = 0;
+		artifactsOffset = 0;
 		await Promise.all([loadDatasets(), loadRuns()]);
 	}
 
@@ -225,14 +256,29 @@
 		datasetsLoading = true;
 		datasetError = '';
 		try {
-			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/datasets`);
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/datasets?limit=${datasetsLimit}&offset=${datasetsOffset}`
+			);
 			if (!res.ok) throw new Error('Failed to fetch datasets');
 			datasets = await res.json();
+			datasetsHasNext = datasets.length === datasetsLimit;
 		} catch (e) {
 			datasetError = (e as Error).message;
 		} finally {
 			datasetsLoading = false;
 		}
+	}
+
+	function nextDatasetsPage() {
+		if (!datasetsHasNext) return;
+		datasetsOffset += datasetsLimit;
+		loadDatasets();
+	}
+
+	function prevDatasetsPage() {
+		if (datasetsOffset === 0) return;
+		datasetsOffset = Math.max(0, datasetsOffset - datasetsLimit);
+		loadDatasets();
 	}
 
 	async function ingestFile() {
@@ -253,7 +299,8 @@
 			if (!res.ok) throw new Error('Upload failed');
 			const dataset = await res.json();
 			uploadMessage = 'Upload successful';
-			datasets = [...datasets, dataset];
+			datasetsOffset = 0;
+			await loadDatasets();
 		} catch (e) {
 			uploadError = (e as Error).message;
 		} finally {
@@ -274,7 +321,8 @@
 			});
 			if (!res.ok) throw new Error('Failed to create dataset');
 			const dataset = await res.json();
-			datasets = [...datasets, dataset];
+			datasetsOffset = 0;
+			await loadDatasets();
 			newDatasetName = '';
 			newDatasetSource = '';
 		} catch (e) {
@@ -293,7 +341,7 @@
 				method: 'DELETE'
 			});
 			if (!res.ok) throw new Error('Failed to delete dataset');
-			datasets = datasets.filter((d) => d.id !== datasetId);
+			await loadDatasets();
 			if (selectedDatasetId === datasetId) selectedDatasetId = '';
 		} catch (e) {
 			datasetActionError = (e as Error).message;
@@ -337,14 +385,29 @@
 		runsLoading = true;
 		runsError = '';
 		try {
-			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/runs`);
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/runs?limit=${runsLimit}&offset=${runsOffset}`
+			);
 			if (!res.ok) throw new Error('Failed to fetch runs');
 			runs = await res.json();
+			runsHasNext = runs.length === runsLimit;
 		} catch (e) {
 			runsError = (e as Error).message;
 		} finally {
 			runsLoading = false;
 		}
+	}
+
+	function nextRunsPage() {
+		if (!runsHasNext) return;
+		runsOffset += runsLimit;
+		loadRuns();
+	}
+
+	function prevRunsPage() {
+		if (runsOffset === 0) return;
+		runsOffset = Math.max(0, runsOffset - runsLimit);
+		loadRuns();
 	}
 
 	async function createRun() {
@@ -359,8 +422,9 @@
 			});
 			if (!res.ok) throw new Error('Failed to start run');
 			const run = await res.json();
-			runs = [run, ...runs];
 			runMessage = `Started ${runType} run`;
+			runsOffset = 0;
+			await loadRuns();
 			pollRun(run.id);
 		} catch (e) {
 			runError = (e as Error).message;
@@ -401,7 +465,7 @@
 				method: 'DELETE'
 			});
 			if (!res.ok) throw new Error('Failed to delete run');
-			runs = runs.filter((r) => r.id !== runId);
+			await loadRuns();
 			if (selectedRunId === runId) selectedRunId = '';
 		} catch (e) {
 			runActionError = (e as Error).message;
@@ -412,6 +476,7 @@
 
 	function selectRun(runId: string) {
 		selectedRunId = runId;
+		artifactsOffset = 0;
 		loadArtifacts(runId);
 	}
 
@@ -422,15 +487,34 @@
 		artifactsError = '';
 		selectedRunArtifacts = [];
 		try {
-			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/artifacts`);
+			const params = new URLSearchParams({
+				limit: String(artifactsLimit),
+				offset: String(artifactsOffset),
+				run_id: runId,
+			});
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/artifacts?${params.toString()}`
+			);
 			if (!res.ok) throw new Error('Failed to fetch artifacts');
-			const all = await res.json();
-			selectedRunArtifacts = all.filter((a: Artifact) => a.run_id === runId);
+			selectedRunArtifacts = await res.json();
+			artifactsHasNext = selectedRunArtifacts.length === artifactsLimit;
 		} catch (e) {
 			artifactsError = (e as Error).message;
 		} finally {
 			artifactsLoading = false;
 		}
+	}
+
+	function nextArtifactsPage() {
+		if (!artifactsHasNext || !selectedRunId) return;
+		artifactsOffset += artifactsLimit;
+		loadArtifacts(selectedRunId);
+	}
+
+	function prevArtifactsPage() {
+		if (artifactsOffset === 0 || !selectedRunId) return;
+		artifactsOffset = Math.max(0, artifactsOffset - artifactsLimit);
+		loadArtifacts(selectedRunId);
 	}
 
 	async function onPreviewArtifact(artifactId: string) {
@@ -488,6 +572,11 @@
 			{isCreating}
 			{deletingProjectId}
 			{selectedProjectId}
+			pageSize={projectsLimit}
+			pageOffset={projectsOffset}
+			hasNext={projectsHasNext}
+			onPrevPage={prevProjectsPage}
+			onNextPage={nextProjectsPage}
 			onCreate={createProject}
 			onDelete={deleteProject}
 			onSelect={selectProject}
@@ -511,6 +600,11 @@
 				{datasetActionError}
 				{deletingDatasetId}
 				bind:selectedDatasetId
+				pageSize={datasetsLimit}
+				pageOffset={datasetsOffset}
+				hasNext={datasetsHasNext}
+				onPrevPage={prevDatasetsPage}
+				onNextPage={nextDatasetsPage}
 				onProjectChange={(id) => selectProject(id)}
 				onUpload={ingestFile}
 				onCreateDataset={createDataset}
@@ -550,6 +644,11 @@
 				{deletingRunId}
 				{selectedProjectId}
 				{selectedRunId}
+				pageSize={runsLimit}
+				pageOffset={runsOffset}
+				hasNext={runsHasNext}
+				onPrevPage={prevRunsPage}
+				onNextPage={nextRunsPage}
 				onCreateRun={createRun}
 				onSelectRun={selectRun}
 				onDeleteRun={deleteRun}
@@ -576,6 +675,11 @@
 					{previewArtifactId}
 					{deletingArtifactId}
 					{apiBase}
+					pageSize={artifactsLimit}
+					pageOffset={artifactsOffset}
+					hasNext={artifactsHasNext}
+					onPrevPage={prevArtifactsPage}
+					onNextPage={nextArtifactsPage}
 					onPreviewArtifact={onPreviewArtifact}
 					onDeleteArtifact={deleteArtifact}
 					onClearRunFilter={clearRunSelection}
@@ -643,14 +747,18 @@
 	:global(.form button:disabled) { opacity: 0.5; cursor: not-allowed; }
 	:global(.error) { color: #ef4444; font-size: 14px; margin: 0; }
 	:global(.muted) { color: #71717a; font-size: 14px; margin: 0; }
+	:global(.success) { color: #15803d; font-size: 14px; margin: 0; }
 	:global(.card ul) { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 	:global(.card ul li) { padding: 12px; border: 1px solid #f4f4f5; border-radius: 8px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 	:global(.card ul li:last-child) { border-bottom: none; }
 	:global(.card ul li strong) { display: block; font-size: 14px; }
 	:global(.card ul li span) { display: block; font-size: 12px; color: #71717a; margin-top: 2px; word-break: break-all; overflow-wrap: anywhere; }
 	:global(.card ul li .actions) { margin-left: auto; flex-shrink: 0; }
+	:global(.card__actions) { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 	:global(button.danger) { background: #fee2e2; color: #ef4444; }
 	:global(button.danger:hover) { background: #fecaca; }
+	:global(button.secondary) { background: #f4f4f5; color: #18181b; border: 1px solid #e4e4e7; }
+	:global(button.secondary:hover) { background: #e4e4e7; }
 	:global(.link) { color: #2563eb; text-decoration: none; font-size: 14px; }
 	:global(.link:hover) { text-decoration: underline; }
 	:global(.actions) { display: flex; gap: 8px; align-items: center; }
@@ -664,4 +772,7 @@
 	:global(.preview table) { width: 100%; border-collapse: collapse; font-size: 12px; }
 	:global(.preview th, .preview td) { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; white-space: nowrap; }
 	:global(.preview th) { background: #f4f4f5; font-weight: 600; position: sticky; top: 0; }
+	:global(.pager) { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 8px; border-top: 1px solid #f4f4f5; }
+	:global(.pager__info) { font-size: 12px; color: #71717a; }
+	:global(.pager__actions) { display: flex; gap: 8px; }
 </style>

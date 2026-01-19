@@ -29,10 +29,19 @@
 	export let deletingRunId = "";
 	export let selectedProjectId = "";
 	export let selectedRunId = "";
+	export let pageSize = 10;
+	export let pageOffset = 0;
+	export let hasNext = false;
 	export let onCreateRun: () => void;
 	export let onSelectRun: (runId: string) => void;
 	export let onDeleteRun: (runId: string) => void;
 	export let datasetNameById: (datasetId: string) => string;
+	export let onPrevPage: () => void;
+	export let onNextPage: () => void;
+
+	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
+	$: rangeStart = filteredRuns.length ? pageOffset + 1 : 0;
+	$: rangeEnd = pageOffset + filteredRuns.length;
 </script>
 
 <div class="card">
@@ -115,5 +124,20 @@
 				</li>
 			{/each}
 		</ul>
+	{/if}
+	{#if !runsLoading && !runsError && filteredRuns.length}
+		<div class="pager">
+			<span class="pager__info">
+				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}
+			</span>
+			<div class="pager__actions">
+				<button class="secondary" on:click={onPrevPage} disabled={pageOffset === 0}>
+					Previous
+				</button>
+				<button class="secondary" on:click={onNextPage} disabled={!hasNext}>
+					Next
+				</button>
+			</div>
+		</div>
 	{/if}
 </div>

@@ -14,9 +14,18 @@
 	export let isCreating = false;
 	export let deletingProjectId = "";
 	export let selectedProjectId = "";
+	export let pageSize = 10;
+	export let pageOffset = 0;
+	export let hasNext = false;
 	export let onCreate: () => void;
 	export let onDelete: (projectId: string) => void;
 	export let onSelect: (projectId: string) => void;
+	export let onPrevPage: () => void;
+	export let onNextPage: () => void;
+
+	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
+	$: rangeStart = projects.length ? pageOffset + 1 : 0;
+	$: rangeEnd = pageOffset + projects.length;
 </script>
 
 <div class="card">
@@ -69,5 +78,20 @@
 	{/if}
 	{#if projectActionError}
 		<p class="error">{projectActionError}</p>
+	{/if}
+	{#if !loading && !error && projects.length}
+		<div class="pager">
+			<span class="pager__info">
+				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}
+			</span>
+			<div class="pager__actions">
+				<button class="secondary" on:click={onPrevPage} disabled={pageOffset === 0}>
+					Previous
+				</button>
+				<button class="secondary" on:click={onNextPage} disabled={!hasNext}>
+					Next
+				</button>
+			</div>
+		</div>
 	{/if}
 </div>

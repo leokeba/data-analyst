@@ -233,11 +233,10 @@ data-analyst/
 ```
 
 ## Next steps
-1. Add dataset preview table UI (render preview rows).
-2. Add pagination controls in UI for projects/datasets/runs/artifacts.
-3. Add report styling and richer markdown sections.
-4. Add artifact delete confirmation UX.
-5. Add production-ready build steps for web + API.
+1. Add pagination controls in UI for projects/datasets/runs/artifacts.
+2. Add report styling and richer markdown sections.
+3. Add artifact delete confirmation UX.
+4. Add production-ready build steps for web + API.
 
 ## Roadmap
 Status: v0.2 kickoff (2026-01-19)

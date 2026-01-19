@@ -33,10 +33,19 @@
 	export let previewArtifactId = "";
 	export let deletingArtifactId = "";
 	export let apiBase = "";
+	export let pageSize = 10;
+	export let pageOffset = 0;
+	export let hasNext = false;
 	export let onClearRunFilter: () => void;
 	export let onPreviewArtifact: (artifactId: string) => void;
 	export let onDeleteArtifact: (artifactId: string) => void;
 	export let onRerunSelected: () => void;
+	export let onPrevPage: () => void;
+	export let onNextPage: () => void;
+
+	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
+	$: rangeStart = filteredArtifacts.length ? pageOffset + 1 : 0;
+	$: rangeEnd = pageOffset + filteredArtifacts.length;
 </script>
 
 <div class="card">
@@ -119,6 +128,21 @@
 				</li>
 			{/each}
 		</ul>
+	{/if}
+	{#if !artifactsLoading && !artifactsError && filteredArtifacts.length}
+		<div class="pager">
+			<span class="pager__info">
+				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}
+			</span>
+			<div class="pager__actions">
+				<button class="secondary" on:click={onPrevPage} disabled={pageOffset === 0}>
+					Previous
+				</button>
+				<button class="secondary" on:click={onNextPage} disabled={!hasNext}>
+					Next
+				</button>
+			</div>
+		</div>
 	{/if}
 	{#if previewError}
 		<p class="error">{previewError}</p>
