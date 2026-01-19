@@ -114,6 +114,7 @@
 	let previewContent = '';
 	let previewLoading = false;
 	let previewArtifactId = '';
+	let previewMimeType = '';
 	let deletingArtifactId = '';
 	let artifactsLimit = 10;
 	let artifactsOffset = 0;
@@ -539,12 +540,22 @@
 
 	async function onPreviewArtifact(artifactId: string) {
 		previewArtifactId = artifactId;
+		previewMimeType =
+			selectedRunArtifacts.find((artifact) => artifact.id === artifactId)?.mime_type ?? '';
 		previewLoading = true;
 		try {
 			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/artifacts/${artifactId}/download`);
 			if(res.ok) {
 				const text = await res.text();
-				previewContent = text;
+				if (previewMimeType.includes('json')) {
+					try {
+						previewContent = JSON.stringify(JSON.parse(text), null, 2);
+					} catch {
+						previewContent = text;
+					}
+				} else {
+					previewContent = text;
+				}
 			}
 		} catch(e) {
 			previewError = (e as Error).message;
@@ -694,6 +705,7 @@
 					bind:artifactSearch
 					{previewError}
 					{previewContent}
+					{previewMimeType}
 					{previewLoading}
 					{previewArtifactId}
 					{deletingArtifactId}
@@ -796,6 +808,7 @@
 	:global(.preview table) { width: 100%; border-collapse: collapse; font-size: 12px; }
 	:global(.preview th, .preview td) { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; white-space: nowrap; }
 	:global(.preview th) { background: #f4f4f5; font-weight: 600; position: sticky; top: 0; }
+	:global(.preview__frame) { width: 100%; min-height: 320px; border: 0; background: white; }
 	:global(.pager) { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 8px; border-top: 1px solid #f4f4f5; }
 	:global(.pager__info) { font-size: 12px; color: #71717a; }
 	:global(.pager__actions) { display: flex; gap: 8px; }

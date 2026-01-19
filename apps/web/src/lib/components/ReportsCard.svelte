@@ -29,6 +29,7 @@
 	export let artifactSearch = "";
 	export let previewError = "";
 	export let previewContent = "";
+	export let previewMimeType = "";
 	export let previewLoading = false;
 	export let previewArtifactId = "";
 	export let deletingArtifactId = "";
@@ -155,7 +156,13 @@
 		<p class="error">{previewError}</p>
 	{/if}
 	{#if previewContent}
-		<pre class="preview">{previewContent}</pre>
+		{#if previewMimeType.includes("text/html")}
+			<div class="preview">
+				<iframe class="preview__frame" srcdoc={previewContent} title="Artifact preview"></iframe>
+			</div>
+		{:else}
+			<pre class="preview">{previewContent}</pre>
+		{/if}
 	{/if}
 	{#if artifactActionError}
 		<p class="error">{artifactActionError}</p>
