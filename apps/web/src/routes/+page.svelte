@@ -443,6 +443,18 @@
 
 	const datasetById = (datasetId: string) => datasets.find((item) => item.id === datasetId);
 
+	const latestRunForDataset = (datasetId: string) => {
+		const datasetRuns = runs.filter((run) => run.dataset_id === datasetId);
+		if (!datasetRuns.length) {
+			return null;
+		}
+		return datasetRuns.reduce((latest, current) =>
+			new Date(current.started_at).getTime() > new Date(latest.started_at).getTime()
+				? current
+				: latest
+		);
+	};
+
 	const runById = (runId: string) => runs.find((item) => item.id === runId);
 
 	$: filteredRuns = runs.filter((run) => {
@@ -679,6 +691,11 @@
 							{#if dataset.schema_snapshot?.columns?.length}
 								<span>
 									Columns: {dataset.schema_snapshot.columns.map((col) => col.name).join(", ")}
+								</span>
+							{/if}
+							{#if latestRunForDataset(dataset.id)}
+								<span>
+									Last run: {latestRunForDataset(dataset.id)?.type} · {latestRunForDataset(dataset.id)?.status}
 								</span>
 							{/if}
 							<button
