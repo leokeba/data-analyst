@@ -12,8 +12,8 @@ def create_project(payload: ProjectCreate) -> ProjectRead:
 
 
 @router.get("", response_model=list[ProjectRead])
-def list_projects() -> list[ProjectRead]:
-    return store.list_projects()
+def list_projects(limit: int = 100, offset: int = 0) -> list[ProjectRead]:
+    return store.list_projects(limit=limit, offset=offset)
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

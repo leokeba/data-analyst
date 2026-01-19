@@ -136,9 +136,14 @@ def create_project(payload: ProjectCreate) -> ProjectRead:
     return _project_read(project)
 
 
-def list_projects() -> list[ProjectRead]:
+def list_projects(limit: int = 100, offset: int = 0) -> list[ProjectRead]:
     with get_session() as session:
-        projects = session.exec(select(Project).order_by(Project.created_at)).all()
+        projects = session.exec(
+            select(Project)
+            .order_by(Project.created_at)
+            .offset(offset)
+            .limit(limit)
+        ).all()
     return [_project_read(project) for project in projects]
 
 
@@ -208,12 +213,14 @@ def create_dataset_from_upload(project_id: str, filename: str, data: bytes) -> D
     return _create_dataset_record(project_id, payload)
 
 
-def list_datasets(project_id: str) -> list[DatasetRead]:
+def list_datasets(project_id: str, limit: int = 100, offset: int = 0) -> list[DatasetRead]:
     with get_session() as session:
         datasets = session.exec(
             select(Dataset)
             .where(Dataset.project_id == project_id)
             .order_by(Dataset.created_at)
+            .offset(offset)
+            .limit(limit)
         ).all()
     return [_dataset_read(dataset) for dataset in datasets]
 
@@ -518,10 +525,14 @@ def _analyze_dataset(dataset_id: str) -> dict[str, object] | None:
     }
 
 
-def list_runs(project_id: str) -> list[RunRead]:
+def list_runs(project_id: str, limit: int = 100, offset: int = 0) -> list[RunRead]:
     with get_session() as session:
         runs = session.exec(
-            select(Run).where(Run.project_id == project_id).order_by(Run.started_at)
+            select(Run)
+            .where(Run.project_id == project_id)
+            .order_by(Run.started_at)
+            .offset(offset)
+            .limit(limit)
         ).all()
     return [_run_read(run) for run in runs]
 
@@ -555,13 +566,20 @@ def delete_run(project_id: str, run_id: str) -> None:
                 artifact_path.unlink(missing_ok=True)
 
 
-def list_artifacts(run_id: str) -> list[ArtifactRead]:
+def list_artifacts(run_id: str, limit: int = 100, offset: int = 0) -> list[ArtifactRead]:
     with get_session() as session:
-        artifacts = session.exec(select(Artifact).where(Artifact.run_id == run_id)).all()
+        artifacts = session.exec(
+            select(Artifact)
+            .where(Artifact.run_id == run_id)
+            .offset(offset)
+            .limit(limit)
+        ).all()
     return [_artifact_read(artifact) for artifact in artifacts]
 
 
-def list_project_artifacts(project_id: str, run_id: str | None = None) -> list[ArtifactRead]:
+def list_project_artifacts(
+    project_id: str, run_id: str | None = None, limit: int = 100, offset: int = 0
+) -> list[ArtifactRead]:
     with get_session() as session:
         runs = session.exec(select(Run).where(Run.project_id == project_id)).all()
         run_ids = {run.id for run in runs}
@@ -571,7 +589,12 @@ def list_project_artifacts(project_id: str, run_id: str | None = None) -> list[A
             run_ids = {run_id}
         if not run_ids:
             return []
-        artifacts = session.exec(select(Artifact).where(Artifact.run_id.in_(run_ids))).all()
+        artifacts = session.exec(
+            select(Artifact)
+            .where(Artifact.run_id.in_(run_ids))
+            .offset(offset)
+            .limit(limit)
+        ).all()
     return [_artifact_read(artifact) for artifact in artifacts]
 
 

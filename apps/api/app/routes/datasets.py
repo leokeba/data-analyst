@@ -18,10 +18,10 @@ def create_dataset(project_id: str, payload: DatasetCreate) -> DatasetRead:
 
 
 @router.get("", response_model=list[DatasetRead])
-def list_datasets(project_id: str) -> list[DatasetRead]:
+def list_datasets(project_id: str, limit: int = 100, offset: int = 0) -> list[DatasetRead]:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    return store.list_datasets(project_id)
+    return store.list_datasets(project_id, limit=limit, offset=offset)
 
 
 @router.get("/{dataset_id}", response_model=DatasetRead)

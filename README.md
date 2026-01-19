@@ -116,6 +116,8 @@ Data‑analyst agent framework for end‑to‑end ingestion, profiling, analysis
 - Idempotent runs per dataset and stage.
 
 ### API surface (v0.1)
+- List endpoints support `limit` + `offset` query params.
+- Errors return JSON: `{ "error": "message", "status_code": <int> }`.
 - `GET /health`
 - `POST /projects`, `GET /projects`, `GET /projects/{id}`, `DELETE /projects/{id}`
 - `POST /projects/{id}/datasets` (ingest)

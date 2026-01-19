@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes.artifacts import router as artifacts_router
@@ -24,6 +25,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail
+    if isinstance(detail, dict):
+        payload = {"error": detail}
+    else:
+        payload = {"error": str(detail)}
+    payload["status_code"] = exc.status_code
+    return JSONResponse(status_code=exc.status_code, content=payload)
 
 
 app.include_router(health_router)
