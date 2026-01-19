@@ -265,7 +265,12 @@ Status: v0.2 kickoff (2026-01-19)
 - AuthN/AuthZ, multi‑user project access.
 - Control plane UX polish (pagination, preview tables, modular UI).
 
-**v0.3**
+**v0.3 (LLM agents)**
+- LLM agent orchestration for assisted workflows.
+- Safe tool routing and audit logging for agent actions.
+- Prompt templates for ingest/profile/analyze/report guidance.
+
+**Future improvements**
 - Job queue + workers (Celery/RQ).
 - Observability dashboards + alerts.
 - Connector marketplace + custom connectors.
