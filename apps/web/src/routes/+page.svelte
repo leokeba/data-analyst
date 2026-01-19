@@ -817,6 +817,8 @@
 	:global(.tag.failure) { background: #fee2e2; color: #b91c1c; }
 	:global(.tag.running) { background: #e0f2fe; color: #0369a1; }
 	:global(.preview) { overflow-x: auto; border: 1px solid #e4e4e7; border-radius: 8px; padding: 12px; background: #fafafa; }
+	:global(pre.preview) { margin: 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-height: 420px; overflow: auto; }
+	:global(.preview pre) { margin: 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-height: 420px; overflow: auto; }
 	:global(.preview table) { width: 100%; border-collapse: collapse; font-size: 12px; }
 	:global(.preview th, .preview td) { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; white-space: nowrap; }
 	:global(.preview th) { background: #f4f4f5; font-weight: 600; position: sticky; top: 0; }
