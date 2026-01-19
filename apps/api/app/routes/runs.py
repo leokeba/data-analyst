@@ -29,3 +29,11 @@ def get_run(project_id: str, run_id: str) -> RunRead:
     if not run or run.project_id != project_id:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@router.delete("/{run_id}", status_code=204)
+def delete_run(project_id: str, run_id: str) -> None:
+    run = store.get_run(run_id)
+    if not run or run.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    store.delete_run(project_id, run_id)

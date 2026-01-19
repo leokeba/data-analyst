@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from app.models.schemas import ArtifactRead
 from app.services import store
@@ -22,3 +25,25 @@ def get_artifact(project_id: str, artifact_id: str) -> ArtifactRead:
     if not run or run.project_id != project_id:
         raise HTTPException(status_code=404, detail="Artifact not found")
     return artifact
+
+
+@router.get("/{artifact_id}/download")
+def download_artifact(project_id: str, artifact_id: str) -> FileResponse:
+    project = store.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    artifact = store.get_artifact(artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    run = store.get_run(artifact.run_id)
+    if not run or run.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    artifact_path = Path(artifact.path).resolve()
+    workspace_root = Path(project.workspace_path).resolve()
+    if not artifact_path.is_file() or not artifact_path.is_relative_to(workspace_root):
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return FileResponse(
+        path=str(artifact_path),
+        media_type=artifact.mime_type,
+        filename=artifact_path.name,
+    )

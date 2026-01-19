@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import csv
+import json
 from pathlib import Path
 import shutil
 
@@ -46,6 +48,15 @@ def _is_probable_file_source(source: str) -> bool:
     if "://" in source:
         return False
     return True
+
+
+def _resolve_source_path(source: str) -> Path | None:
+    if not _is_probable_file_source(source):
+        return None
+    source_path = Path(source.replace("file://", "")).expanduser().resolve()
+    if not source_path.exists() or not source_path.is_file():
+        return None
+    return source_path
 
 
 def _maybe_copy_source(project_id: str, source: str) -> None:
@@ -136,7 +147,11 @@ def get_project(project_id: str) -> ProjectRead | None:
 
 
 def delete_project(project_id: str) -> None:
+    workspace_root: Path | None = None
     with get_session() as session:
+        project = session.get(Project, project_id)
+        if project:
+            workspace_root = Path(project.workspace_path)
         datasets = session.exec(
             select(Dataset).where(Dataset.project_id == project_id)
         ).all()
@@ -150,10 +165,14 @@ def delete_project(project_id: str) -> None:
                     session.delete(artifact)
                 session.delete(run)
             session.delete(dataset)
-        project = session.get(Project, project_id)
         if project:
             session.delete(project)
         session.commit()
+    if workspace_root:
+        repo_root = _repo_root().resolve()
+        workspace_root = workspace_root.resolve()
+        if workspace_root.is_dir() and workspace_root.is_relative_to(repo_root):
+            shutil.rmtree(workspace_root, ignore_errors=True)
 
 
 def _create_dataset_record(project_id: str, payload: DatasetCreate) -> DatasetRead:
@@ -202,10 +221,16 @@ def get_dataset(dataset_id: str) -> DatasetRead | None:
 
 
 def delete_dataset(project_id: str, dataset_id: str) -> None:
+    workspace_root: Path | None = None
+    source_path: Path | None = None
     with get_session() as session:
         dataset = session.get(Dataset, dataset_id)
         if not dataset or dataset.project_id != project_id:
             return
+        project = session.get(Project, project_id)
+        if project:
+            workspace_root = Path(project.workspace_path)
+        source_path = _resolve_source_path(dataset.source)
         runs = session.exec(select(Run).where(Run.dataset_id == dataset_id)).all()
         for run in runs:
             artifacts = session.exec(select(Artifact).where(Artifact.run_id == run.id)).all()
@@ -214,6 +239,12 @@ def delete_dataset(project_id: str, dataset_id: str) -> None:
             session.delete(run)
         session.delete(dataset)
         session.commit()
+    if workspace_root and source_path:
+        repo_root = _repo_root().resolve()
+        workspace_root = workspace_root.resolve()
+        source_path = source_path.resolve()
+        if source_path.is_file() and source_path.is_relative_to(workspace_root) and source_path.is_relative_to(repo_root):
+            source_path.unlink(missing_ok=True)
 
 
 def create_run(project_id: str, payload: RunCreate) -> RunRead:
@@ -229,7 +260,185 @@ def create_run(project_id: str, payload: RunCreate) -> RunRead:
         session.add(run)
         session.commit()
         session.refresh(run)
-    return _run_read(run)
+    _execute_run_stub(project_id, run.id, payload.dataset_id, payload.type)
+    return get_run(run.id) or _run_read(run)
+
+
+def _execute_run_stub(project_id: str, run_id: str, dataset_id: str, run_type: str) -> None:
+    workspace = _ensure_project_workspace(project_id)
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    with get_session() as session:
+        run = session.get(Run, run_id)
+        if run:
+            run.status = "running"
+            session.add(run)
+            session.commit()
+    artifacts_to_create: list[tuple[str, Path, str]] = []
+    artifact_path = artifacts_dir / f"{run_type}-{run_id}.json"
+    log_path = artifacts_dir / f"{run_type}-{run_id}.log"
+    summary: dict[str, object] = {
+        "run_id": run_id,
+        "project_id": project_id,
+        "dataset_id": dataset_id,
+        "type": run_type,
+        "status": "completed",
+        "generated_at": _now().isoformat(),
+    }
+    if run_type == "profile":
+        profile_summary = _profile_dataset(dataset_id)
+        if profile_summary:
+            summary["profile"] = profile_summary
+    if run_type == "analysis":
+        analysis = _analyze_dataset(dataset_id)
+        if analysis:
+            summary["analysis"] = analysis
+            analysis_path = artifacts_dir / f"analysis-{run_id}.json"
+            analysis_path.write_text(json.dumps(analysis, indent=2))
+            artifacts_to_create.append(("analysis_summary", analysis_path, "application/json"))
+    if run_type == "report":
+        report = _build_report(dataset_id)
+        if report:
+            summary["report"] = {"markdown": str(report["markdown"]), "html": str(report["html"])}
+            artifacts_to_create.append(("report_markdown", report["markdown"], "text/markdown"))
+            artifacts_to_create.append(("report_html", report["html"], "text/html"))
+    artifact_path.write_text(json.dumps(summary, indent=2))
+    log_path.write_text(
+        "\n".join(
+            [
+                f"[{summary['generated_at']}] Run started",
+                f"Run type: {run_type}",
+                f"Dataset id: {dataset_id}",
+                "Status: completed",
+            ]
+        )
+    )
+    artifacts_to_create.append((f"{run_type}_summary", artifact_path, "application/json"))
+    artifacts_to_create.append(("run_log", log_path, "text/plain"))
+    finished_at = _now()
+    with get_session() as session:
+        run = session.get(Run, run_id)
+        if run:
+            run.status = "completed"
+            run.finished_at = finished_at
+            session.add(run)
+        for artifact_type, path, mime_type in artifacts_to_create:
+            artifact = Artifact(
+                run_id=run_id,
+                type=artifact_type,
+                path=str(path),
+                mime_type=mime_type,
+                size=path.stat().st_size,
+            )
+            session.add(artifact)
+        session.commit()
+
+
+def _profile_dataset(dataset_id: str) -> dict[str, object] | None:
+    with get_session() as session:
+        dataset = session.get(Dataset, dataset_id)
+        if not dataset:
+            return None
+        source_path = _resolve_source_path(dataset.source)
+        if not source_path:
+            return None
+        row_count = 0
+        header: list[str] = []
+        with source_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.reader(handle)
+            header = next(reader, [])
+            for _ in reader:
+                row_count += 1
+        column_count = len(header)
+        stats = {
+            "row_count": row_count,
+            "column_count": column_count,
+            "file_size_bytes": source_path.stat().st_size,
+        }
+        schema_snapshot = {
+            "columns": [{"name": name, "index": idx} for idx, name in enumerate(header)]
+        }
+        dataset.stats = stats
+        dataset.schema_snapshot = schema_snapshot
+        session.add(dataset)
+        session.commit()
+        return {"stats": stats, "schema": schema_snapshot, "source": str(source_path)}
+
+
+def _build_report(dataset_id: str) -> dict[str, Path] | None:
+    with get_session() as session:
+        dataset = session.get(Dataset, dataset_id)
+        if not dataset:
+            return None
+        stats = dataset.stats or {}
+        schema = dataset.schema_snapshot or {}
+    workspace = _repo_root() / "projects" / dataset.project_id
+    artifacts_dir = workspace / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    report_md = artifacts_dir / f"report-{dataset_id}.md"
+    report_html = artifacts_dir / f"report-{dataset_id}.html"
+    columns = schema.get("columns", []) if isinstance(schema, dict) else []
+    md = "".join(
+        [
+            f"# Dataset report\n\n",
+            f"**Dataset:** {dataset.name}\n\n",
+            f"**Source:** {dataset.source}\n\n",
+            f"## Summary\n",
+            f"- Rows: {stats.get('row_count', '—')}\n",
+            f"- Columns: {stats.get('column_count', '—')}\n",
+            f"- File size: {stats.get('file_size_bytes', '—')} bytes\n\n",
+            "## Columns\n",
+            "\n".join([f"- {col.get('name', '')}" for col in columns]) or "- (none)",
+            "\n",
+        ]
+    )
+    report_md.write_text(md)
+    html = "".join(
+        [
+            "<html><head><meta charset='utf-8'><title>Dataset report</title></head><body>",
+            f"<h1>Dataset report</h1>",
+            f"<p><strong>Dataset:</strong> {dataset.name}</p>",
+            f"<p><strong>Source:</strong> {dataset.source}</p>",
+            "<h2>Summary</h2>",
+            "<ul>",
+            f"<li>Rows: {stats.get('row_count', '—')}</li>",
+            f"<li>Columns: {stats.get('column_count', '—')}</li>",
+            f"<li>File size: {stats.get('file_size_bytes', '—')} bytes</li>",
+            "</ul>",
+            "<h2>Columns</h2>",
+            "<ul>",
+            "".join([f"<li>{col.get('name', '')}</li>" for col in columns]) or "<li>(none)</li>",
+            "</ul>",
+            "</body></html>",
+        ]
+    )
+    report_html.write_text(html)
+    return {"markdown": report_md, "html": report_html}
+
+
+def _analyze_dataset(dataset_id: str) -> dict[str, object] | None:
+    with get_session() as session:
+        dataset = session.get(Dataset, dataset_id)
+        if not dataset:
+            return None
+        source_path = _resolve_source_path(dataset.source)
+        if not source_path:
+            return None
+    sample_rows: list[list[str]] = []
+    header: list[str] = []
+    with source_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.reader(handle)
+        header = next(reader, [])
+        for idx, row in enumerate(reader):
+            sample_rows.append(row)
+            if idx >= 4:
+                break
+    return {
+        "source": str(source_path),
+        "columns": header,
+        "sample_rows": sample_rows,
+        "sample_row_count": len(sample_rows),
+    }
 
 
 def list_runs(project_id: str) -> list[RunRead]:
@@ -247,15 +456,26 @@ def get_run(run_id: str) -> RunRead | None:
 
 
 def delete_run(project_id: str, run_id: str) -> None:
+    workspace_root: Path | None = None
     with get_session() as session:
         run = session.get(Run, run_id)
         if not run or run.project_id != project_id:
             return
+        project = session.get(Project, project_id)
+        if project:
+            workspace_root = Path(project.workspace_path)
         artifacts = session.exec(select(Artifact).where(Artifact.run_id == run_id)).all()
         for artifact in artifacts:
             session.delete(artifact)
         session.delete(run)
         session.commit()
+    if workspace_root:
+        repo_root = _repo_root().resolve()
+        workspace_root = workspace_root.resolve()
+        for artifact in artifacts:
+            artifact_path = Path(artifact.path).resolve()
+            if artifact_path.is_file() and artifact_path.is_relative_to(workspace_root) and artifact_path.is_relative_to(repo_root):
+                artifact_path.unlink(missing_ok=True)
 
 
 def list_artifacts(run_id: str) -> list[ArtifactRead]:

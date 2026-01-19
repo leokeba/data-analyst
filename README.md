@@ -2,6 +2,27 @@
 
 Data‑analyst agent framework for end‑to‑end ingestion, profiling, analysis, metadata, and reporting. This repository will include a FastAPI backend and a Svelte frontend for control and observability.
 
+## Local development
+
+### Backend (FastAPI)
+1. Install Python dependencies:
+	- `uv sync`
+2. Run the API:
+	- `uv run uvicorn app.main:app --reload --port 8000 --app-dir apps/api`
+3. Smoke test:
+	- `curl http://127.0.0.1:8000/health`
+
+### Web UI (SvelteKit)
+1. Install frontend dependencies:
+	- `cd apps/web && npm install`
+2. Run the dev server:
+	- `cd apps/web && npm run dev -- --host 127.0.0.1 --port 5173`
+3. Optional API base override:
+	- `VITE_API_BASE=http://127.0.0.1:8000 cd apps/web && npm run dev -- --host 127.0.0.1 --port 5173`
+
+### Tests
+- `uv run pytest apps/api/tests`
+
 ## MVP spec (v0.1)
 
 ### Goals
@@ -99,9 +120,13 @@ Data‑analyst agent framework for end‑to‑end ingestion, profiling, analysis
 - `POST /projects`, `GET /projects`, `GET /projects/{id}`, `DELETE /projects/{id}`
 - `POST /projects/{id}/datasets` (ingest)
 - `GET /projects/{id}/datasets`, `GET /projects/{id}/datasets/{dataset_id}`
+- `DELETE /projects/{id}/datasets/{dataset_id}`
 - `POST /projects/{id}/runs` (profile|analysis|report)
 - `GET /projects/{id}/runs`, `GET /projects/{id}/runs/{run_id}`
+- `DELETE /projects/{id}/runs/{run_id}`
+- `GET /projects/{id}/artifacts` (optional `?run_id=` filter)
 - `GET /projects/{id}/artifacts/{artifact_id}`
+- `GET /projects/{id}/artifacts/{artifact_id}/download`
 
 ### Frontend MVP pages
 - **Projects**: list + create.
@@ -203,20 +228,25 @@ data-analyst/
 ```
 
 ## Next steps
-1. Create the directory structure and base project configs.
-2. Implement FastAPI skeleton (health, projects, runs).
-3. Implement Svelte UI shell (projects list + detail).
-4. Add ingestion + profiling pipeline for CSV.
-5. Add report generator for HTML/Markdown.
+1. Add run detail + artifact preview/download UX.
+2. Add basic report generation (Markdown + HTML).
+3. Add simple run logs and status transitions.
+4. Add minimal tests for API CRUD + run stub.
+5. Add production-ready build steps for web + API.
 
 ## Roadmap
 **v0.1 (MVP)**
 - Local filesystem storage.
 - Single‑node execution.
 - CSV/Parquet/JSON + Postgres/SQLite ingestion.
-- Profiling + basic quality checks.
-- Basic analysis + report generation.
-- Svelte control plane for projects/datasets/runs.
+- Profiling stub + basic quality checks.
+- Basic analysis stub + report generation.
+- Svelte control plane for projects/datasets/runs/artifacts.
+- Artifact download endpoint + UI links.
+- Run log artifacts and report Markdown/HTML outputs.
+- Artifact filtering + preview UX.
+- CRUD cleanup for datasets/runs/projects + workspace files.
+- API smoke tests (pytest).
 
 **v0.2**
 - Pluggable storage (S3/GCS).

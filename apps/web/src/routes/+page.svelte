@@ -18,21 +18,44 @@
 	let newProjectName = "";
 	let isCreating = false;
 	let createError = "";
+	let projectActionError = "";
+	let deletingProjectId = "";
 	let selectedProjectId = "";
 	let uploadFile: File | null = null;
 	let uploadError = "";
 	let uploadMessage = "";
 	let isUploading = false;
+	let newDatasetName = "";
+	let newDatasetSource = "";
+	let isCreatingDataset = false;
+	let createDatasetError = "";
 	let datasets: Dataset[] = [];
 	let datasetError = "";
 	let datasetsLoading = false;
+	let datasetActionError = "";
+	let deletingDatasetId = "";
 	let selectedDatasetId = "";
 	let runType: RunType = "profile";
 	let runMessage = "";
 	let runError = "";
 	let isRunning = false;
+	let runs: Run[] = [];
+	let runsLoading = false;
+	let runsError = "";
+	let runActionError = "";
+	let deletingRunId = "";
+	let artifacts: Artifact[] = [];
+	let artifactsLoading = false;
+	let artifactsError = "";
+	let selectedRunId = "";
+	let previewArtifactId = "";
+	let previewContent = "";
+	let previewError = "";
+	let previewLoading = false;
+	let artifactTypeFilter = "all";
+	let artifactSearch = "";
 
-	const apiBase = "http://localhost:8000";
+	const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
 	type Dataset = {
 		id: string;
@@ -40,9 +63,36 @@
 		name: string;
 		source: string;
 		created_at: string;
+		stats?: {
+			row_count?: number;
+			column_count?: number;
+			file_size_bytes?: number;
+		};
+		schema_snapshot?: {
+			columns?: { name: string; index: number }[];
+		};
 	};
 
 	type RunType = "ingest" | "profile" | "analysis" | "report";
+
+	type Run = {
+		id: string;
+		project_id: string;
+		dataset_id: string;
+		type: RunType;
+		status: string;
+		started_at: string;
+		finished_at: string | null;
+	};
+
+	type Artifact = {
+		id: string;
+		run_id: string;
+		type: string;
+		path: string;
+		mime_type: string;
+		size: number;
+	};
 
 	onMount(async () => {
 		await loadProjects();
@@ -71,6 +121,7 @@
 		}
 		isCreating = true;
 		createError = "";
+		projectActionError = "";
 		try {
 			const response = await fetch(`${apiBase}/projects`, {
 				method: "POST",
@@ -84,12 +135,41 @@
 			newProjectName = "";
 			if (!selectedProjectId) {
 				selectedProjectId = created.id;
+				await loadDatasets(created.id);
+				await loadRuns(created.id);
+				await loadArtifacts(created.id);
 			}
 			await loadProjects();
 		} catch (err) {
 			createError = err instanceof Error ? err.message : "Failed to create project";
 		} finally {
 			isCreating = false;
+		}
+	};
+
+	const deleteProject = async (projectId: string) => {
+		projectActionError = "";
+		deletingProjectId = projectId;
+		try {
+			const response = await fetch(`${apiBase}/projects/${projectId}`, {
+				method: "DELETE"
+			});
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			if (selectedProjectId === projectId) {
+				selectedProjectId = "";
+				selectedDatasetId = "";
+				datasets = [];
+				runs = [];
+				artifacts = [];
+			}
+			await loadProjects();
+		} catch (err) {
+			projectActionError =
+				err instanceof Error ? err.message : "Failed to delete project";
+		} finally {
+			deletingProjectId = "";
 		}
 	};
 
@@ -109,13 +189,55 @@
 		}
 	};
 
+	const loadRuns = async (projectId: string) => {
+		runsLoading = true;
+		runsError = "";
+		try {
+			const response = await fetch(`${apiBase}/projects/${projectId}/runs`);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			runs = await response.json();
+		} catch (err) {
+			runsError = err instanceof Error ? err.message : "Failed to load runs";
+		} finally {
+			runsLoading = false;
+		}
+	};
+
+	const loadArtifacts = async (projectId: string, runId?: string) => {
+		artifactsLoading = true;
+		artifactsError = "";
+		try {
+			const url = new URL(`${apiBase}/projects/${projectId}/artifacts`);
+			if (runId) {
+				url.searchParams.set("run_id", runId);
+			}
+			const response = await fetch(url.toString());
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			artifacts = await response.json();
+		} catch (err) {
+			artifactsError = err instanceof Error ? err.message : "Failed to load artifacts";
+		} finally {
+			artifactsLoading = false;
+		}
+	};
+
 	const handleProjectSelection = async (value: string) => {
 		selectedProjectId = value;
 		selectedDatasetId = "";
 		if (value) {
 			await loadDatasets(value);
+			await loadRuns(value);
+			selectedRunId = "";
+			await loadArtifacts(value);
 		} else {
 			datasets = [];
+			runs = [];
+			artifacts = [];
+			selectedRunId = "";
 		}
 	};
 
@@ -154,9 +276,73 @@
 		}
 	};
 
+	const createDataset = async () => {
+		createDatasetError = "";
+		if (!selectedProjectId) {
+			createDatasetError = "Select a project first.";
+			return;
+		}
+		if (!newDatasetName.trim() || !newDatasetSource.trim()) {
+			createDatasetError = "Name and source are required.";
+			return;
+		}
+		isCreatingDataset = true;
+		try {
+			const response = await fetch(`${apiBase}/projects/${selectedProjectId}/datasets`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					name: newDatasetName.trim(),
+					source: newDatasetSource.trim()
+				})
+			});
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			newDatasetName = "";
+			newDatasetSource = "";
+			await loadDatasets(selectedProjectId);
+		} catch (err) {
+			createDatasetError =
+				err instanceof Error ? err.message : "Failed to create dataset";
+		} finally {
+			isCreatingDataset = false;
+		}
+	};
+
+	const deleteDataset = async (datasetId: string) => {
+		if (!selectedProjectId) {
+			datasetActionError = "Select a project first.";
+			return;
+		}
+		datasetActionError = "";
+		deletingDatasetId = datasetId;
+		try {
+			const response = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/datasets/${datasetId}`,
+				{ method: "DELETE" }
+			);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			if (selectedDatasetId === datasetId) {
+				selectedDatasetId = "";
+			}
+			await loadDatasets(selectedProjectId);
+			await loadRuns(selectedProjectId);
+			await loadArtifacts(selectedProjectId);
+		} catch (err) {
+			datasetActionError =
+				err instanceof Error ? err.message : "Failed to delete dataset";
+		} finally {
+			deletingDatasetId = "";
+		}
+	};
+
 	const createRun = async () => {
 		runMessage = "";
 		runError = "";
+		runActionError = "";
 		if (!selectedProjectId || !selectedDatasetId) {
 			runError = "Select a project and dataset.";
 			return;
@@ -171,11 +357,113 @@
 			if (!response.ok) {
 				throw new Error(`API error: ${response.status}`);
 			}
-			runMessage = "Run queued.";
+			runMessage = "Run completed (stub).";
+			await loadRuns(selectedProjectId);
+			await loadArtifacts(selectedProjectId, selectedRunId || undefined);
+			await loadDatasets(selectedProjectId);
 		} catch (err) {
 			runError = err instanceof Error ? err.message : "Run failed";
 		} finally {
 			isRunning = false;
+		}
+	};
+
+	const deleteRun = async (runId: string) => {
+		if (!selectedProjectId) {
+			runActionError = "Select a project first.";
+			return;
+		}
+		runActionError = "";
+		deletingRunId = runId;
+		try {
+			const response = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/runs/${runId}`,
+				{ method: "DELETE" }
+			);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			if (selectedRunId === runId) {
+				selectedRunId = "";
+				previewArtifactId = "";
+				previewContent = "";
+				previewError = "";
+			}
+			await loadRuns(selectedProjectId);
+			await loadArtifacts(selectedProjectId, selectedRunId || undefined);
+		} catch (err) {
+			runActionError = err instanceof Error ? err.message : "Failed to delete run";
+		} finally {
+			deletingRunId = "";
+		}
+	};
+
+	const datasetNameById = (datasetId: string) => {
+		const dataset = datasets.find((item) => item.id === datasetId);
+		return dataset ? dataset.name : datasetId;
+	};
+
+	const runById = (runId: string) => runs.find((item) => item.id === runId);
+
+	$: artifactTypes = Array.from(new Set(artifacts.map((item) => item.type))).sort();
+	$: filteredArtifacts = artifacts.filter((artifact) => {
+		const matchesType = artifactTypeFilter === "all" || artifact.type === artifactTypeFilter;
+		const haystack = `${artifact.type} ${artifact.path} ${artifact.run_id}`.toLowerCase();
+		const matchesSearch = !artifactSearch.trim() || haystack.includes(artifactSearch.trim().toLowerCase());
+		return matchesType && matchesSearch;
+	});
+
+	const selectRun = async (runId: string) => {
+		selectedRunId = runId;
+		previewArtifactId = "";
+		previewContent = "";
+		previewError = "";
+		if (selectedProjectId) {
+			await loadArtifacts(selectedProjectId, runId);
+		}
+	};
+
+	const clearRunFilter = async () => {
+		selectedRunId = "";
+		previewArtifactId = "";
+		previewContent = "";
+		previewError = "";
+		if (selectedProjectId) {
+			await loadArtifacts(selectedProjectId);
+		}
+	};
+
+	const previewArtifact = async (artifactId: string) => {
+		if (!selectedProjectId) {
+			previewError = "Select a project first.";
+			return;
+		}
+		previewLoading = true;
+		previewError = "";
+		previewContent = "";
+		previewArtifactId = artifactId;
+		try {
+			const response = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/artifacts/${artifactId}/download`
+			);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			const contentType = response.headers.get("content-type") ?? "";
+			const text = await response.text();
+			if (contentType.includes("application/json")) {
+				try {
+					previewContent = JSON.stringify(JSON.parse(text), null, 2);
+				} catch {
+					previewContent = text;
+				}
+			} else {
+				previewContent = text.slice(0, 4000);
+			}
+		} catch (err) {
+			previewError = err instanceof Error ? err.message : "Preview failed";
+		} finally {
+			previewLoading = false;
 		}
 	};
 </script>
@@ -218,9 +506,19 @@
 						<li>
 							<strong>{project.name}</strong>
 							<span>{project.workspace_path}</span>
+							<button
+								class="danger"
+								on:click={() => deleteProject(project.id)}
+								disabled={deletingProjectId === project.id}
+							>
+								{deletingProjectId === project.id ? "Deleting…" : "Delete"}
+							</button>
 						</li>
 					{/each}
 				</ul>
+			{/if}
+			{#if projectActionError}
+				<p class="error">{projectActionError}</p>
 			{/if}
 		</div>
 		<div class="card">
@@ -245,6 +543,21 @@
 					{isUploading ? "Uploading…" : "Upload"}
 				</button>
 			</div>
+			<div class="form">
+				<input
+					placeholder="Dataset name"
+					bind:value={newDatasetName}
+					disabled={isCreatingDataset}
+				/>
+				<input
+					placeholder="Source path or URL"
+					bind:value={newDatasetSource}
+					disabled={isCreatingDataset}
+				/>
+				<button on:click={createDataset} disabled={isCreatingDataset}>
+					{isCreatingDataset ? "Saving…" : "Add source"}
+				</button>
+			</div>
 			{#if datasetsLoading}
 				<p class="muted">Loading datasets…</p>
 			{:else if datasetError}
@@ -257,6 +570,22 @@
 						<li>
 							<strong>{dataset.name}</strong>
 							<span>{dataset.source}</span>
+							{#if dataset.stats}
+								<span>Rows: {dataset.stats.row_count ?? "—"}</span>
+								<span>Columns: {dataset.stats.column_count ?? "—"}</span>
+							{/if}
+							{#if dataset.schema_snapshot?.columns?.length}
+								<span>
+									Columns: {dataset.schema_snapshot.columns.map((col) => col.name).join(", ")}
+								</span>
+							{/if}
+							<button
+								class="danger"
+								on:click={() => deleteDataset(dataset.id)}
+								disabled={deletingDatasetId === dataset.id}
+							>
+								{deletingDatasetId === dataset.id ? "Deleting…" : "Delete"}
+							</button>
 						</li>
 					{/each}
 				</ul>
@@ -266,6 +595,12 @@
 			{/if}
 			{#if uploadMessage}
 				<p class="success">{uploadMessage}</p>
+			{/if}
+			{#if createDatasetError}
+				<p class="error">{createDatasetError}</p>
+			{/if}
+			{#if datasetActionError}
+				<p class="error">{datasetActionError}</p>
 			{/if}
 		</div>
 		<div class="card">
@@ -294,10 +629,121 @@
 			{#if runMessage}
 				<p class="success">{runMessage}</p>
 			{/if}
+			{#if runActionError}
+				<p class="error">{runActionError}</p>
+			{/if}
+			{#if runsLoading}
+				<p class="muted">Loading runs…</p>
+			{:else if runsError}
+				<p class="error">{runsError}</p>
+			{:else if selectedProjectId && runs.length === 0}
+				<p class="muted">No runs yet.</p>
+			{:else if runs.length > 0}
+				<ul>
+					{#each runs as run}
+						<li>
+							<strong>{run.type} · {run.status}</strong>
+							<span>Dataset: {datasetNameById(run.dataset_id)}</span>
+							<span>Started: {new Date(run.started_at).toLocaleString()}</span>
+							{#if run.finished_at}
+								<span>Finished: {new Date(run.finished_at).toLocaleString()}</span>
+							{/if}
+							<button
+								class="secondary"
+								on:click={() => selectRun(run.id)}
+								disabled={selectedRunId === run.id}
+							>
+								{selectedRunId === run.id ? "Selected" : "View"}
+							</button>
+							<button
+								class="danger"
+								on:click={() => deleteRun(run.id)}
+								disabled={deletingRunId === run.id}
+							>
+								{deletingRunId === run.id ? "Deleting…" : "Delete"}
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
 		</div>
 		<div class="card">
 			<h2>Reports</h2>
 			<p>Publish markdown, HTML, and PDF outputs.</p>
+			<div class="form">
+				{#if selectedRunId}
+					<span class="tag">Filtered by run: {selectedRunId}</span>
+					<button class="secondary" on:click={clearRunFilter}>Show all</button>
+				{/if}
+			</div>
+			<div class="form">
+				<select bind:value={artifactTypeFilter}>
+					<option value="all">All types</option>
+					{#each artifactTypes as type}
+						<option value={type}>{type}</option>
+					{/each}
+				</select>
+				<input
+					placeholder="Search artifacts"
+					bind:value={artifactSearch}
+				/>
+			</div>
+			{#if selectedRunId}
+				{#if runById(selectedRunId)}
+					<div class="summary">
+						<strong>Run details</strong>
+						<span>Type: {runById(selectedRunId)?.type}</span>
+						<span>Status: {runById(selectedRunId)?.status}</span>
+						<span>Dataset: {datasetNameById(runById(selectedRunId)?.dataset_id ?? "")}</span>
+					</div>
+				{/if}
+			{/if}
+			{#if artifactsLoading}
+				<p class="muted">Loading artifacts…</p>
+			{:else if artifactsError}
+				<p class="error">{artifactsError}</p>
+			{:else if selectedProjectId && artifacts.length === 0}
+				<p class="muted">No artifacts yet.</p>
+			{:else if filteredArtifacts.length === 0}
+				<p class="muted">No artifacts match the filters.</p>
+			{:else if filteredArtifacts.length > 0}
+				<ul>
+					{#each filteredArtifacts as artifact}
+						<li>
+							<strong>{artifact.type}</strong>
+							<span>Run: {artifact.run_id}</span>
+							<span>{artifact.path}</span>
+							<span>Type: {artifact.mime_type}</span>
+							<span>Size: {artifact.size} bytes</span>
+							{#if selectedProjectId}
+								<a
+									class="link"
+									href={`${apiBase}/projects/${selectedProjectId}/artifacts/${artifact.id}/download`}
+									target="_blank"
+									rel="noreferrer"
+								>
+									Download
+								</a>
+								<button
+									class="secondary"
+									on:click={() => previewArtifact(artifact.id)}
+									disabled={previewLoading && previewArtifactId === artifact.id}
+								>
+									{previewLoading && previewArtifactId === artifact.id
+										? "Loading…"
+										: "Preview"}
+								</button>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if previewError}
+				<p class="error">{previewError}</p>
+			{/if}
+			{#if previewContent}
+				<pre class="preview">{previewContent}</pre>
+			{/if}
 		</div>
 	</section>
 </main>
@@ -393,6 +839,43 @@
 		cursor: pointer;
 	}
 
+	.secondary {
+		padding: 6px 10px;
+		border-radius: 8px;
+		border: 1px solid #cbd5f5;
+		background: #ffffff;
+		color: #1e293b;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 8px;
+		border-radius: 999px;
+		background: #e2e8f0;
+		color: #475569;
+		font-size: 12px;
+	}
+
+	.danger {
+		align-self: flex-start;
+		padding: 6px 10px;
+		border-radius: 8px;
+		border: 1px solid #fecaca;
+		background: #fee2e2;
+		color: #b91c1c;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.danger:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
 	.form button:disabled,
 	.form input:disabled {
 		opacity: 0.6;
@@ -420,6 +903,39 @@
 	.card li span {
 		color: #64748b;
 		word-break: break-all;
+	}
+
+	.link {
+		color: #2563eb;
+		font-weight: 600;
+		text-decoration: none;
+	}
+
+	.link:hover {
+		text-decoration: underline;
+	}
+
+	.preview {
+		margin-top: 12px;
+		padding: 12px;
+		border-radius: 12px;
+		background: #0f172a;
+		color: #e2e8f0;
+		font-size: 12px;
+		max-height: 240px;
+		overflow: auto;
+	}
+
+	.summary {
+		margin-top: 12px;
+		padding: 10px 12px;
+		border-radius: 12px;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		display: grid;
+		gap: 6px;
+		font-size: 13px;
+		color: #334155;
 	}
 
 	.muted {

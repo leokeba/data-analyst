@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,7 +10,13 @@ from app.routes.projects import router as projects_router
 from app.routes.runs import router as runs_router
 from app.services.db import init_db
 
-app = FastAPI(title="data-analyst API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="data-analyst API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,10 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.on_event("startup")
-def on_startup() -> None:
-    init_db()
 
 app.include_router(health_router)
 app.include_router(projects_router, prefix="/projects", tags=["projects"])

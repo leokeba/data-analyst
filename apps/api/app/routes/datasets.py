@@ -31,6 +31,14 @@ def get_dataset(project_id: str, dataset_id: str) -> DatasetRead:
     return dataset
 
 
+@router.delete("/{dataset_id}", status_code=204)
+def delete_dataset(project_id: str, dataset_id: str) -> None:
+    dataset = store.get_dataset(dataset_id)
+    if not dataset or dataset.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    store.delete_dataset(project_id, dataset_id)
+
+
 @router.post("/upload", response_model=DatasetRead, status_code=201)
 async def upload_dataset(project_id: str, file: UploadFile = File(...)) -> DatasetRead:
     if not store.get_project(project_id):
