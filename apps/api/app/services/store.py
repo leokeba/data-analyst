@@ -382,16 +382,31 @@ def _profile_dataset(dataset_id: str) -> dict[str, object] | None:
             return None
         row_count = 0
         header: list[str] = []
+        missing_by_column: dict[str, int] = {}
+        duplicate_rows = 0
+        seen_rows: set[tuple[str, ...]] = set()
         with source_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
             reader = csv.reader(handle)
             header = next(reader, [])
-            for _ in reader:
+            missing_by_column = {name: 0 for name in header}
+            for row in reader:
                 row_count += 1
+                row_key = tuple(row)
+                if row_key in seen_rows:
+                    duplicate_rows += 1
+                else:
+                    seen_rows.add(row_key)
+                for idx, name in enumerate(header):
+                    value = row[idx] if idx < len(row) else ""
+                    if value == "":
+                        missing_by_column[name] += 1
         column_count = len(header)
         stats = {
             "row_count": row_count,
             "column_count": column_count,
             "file_size_bytes": source_path.stat().st_size,
+            "missing_by_column": missing_by_column,
+            "duplicate_row_count": duplicate_rows,
         }
         schema_snapshot = {
             "columns": [{"name": name, "index": idx} for idx, name in enumerate(header)]

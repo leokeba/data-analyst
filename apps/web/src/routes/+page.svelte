@@ -74,6 +74,8 @@
 			row_count?: number;
 			column_count?: number;
 			file_size_bytes?: number;
+			duplicate_row_count?: number;
+			missing_by_column?: Record<string, number>;
 		};
 		schema_snapshot?: {
 			columns?: { name: string; index: number }[];
@@ -585,8 +587,21 @@
 				<p class="muted">Loading projects…</p>
 			{:else if error}
 				<p class="error">{error}</p>
+						<span>
+							Duplicate rows: {datasetById(selectedDatasetId)?.stats?.duplicate_row_count ?? "—"}
+						</span>
 			{:else if projects.length === 0}
 				<p class="muted">No projects yet.</p>
+				{#if datasetById(selectedDatasetId)?.stats?.missing_by_column}
+					<ul>
+						{#each Object.entries(datasetById(selectedDatasetId)?.stats?.missing_by_column ?? {}) as [name, count]}
+							<li>
+								<strong>{name}</strong>
+								<span>Missing: {count}</span>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			{:else}
 				<ul>
 					{#each projects as project}
