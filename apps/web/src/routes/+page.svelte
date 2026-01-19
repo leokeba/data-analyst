@@ -2,6 +2,37 @@
 	<title>Data Analyst Control Plane</title>
 </svelte:head>
 
+<script lang="ts">
+	import { onMount } from "svelte";
+
+	type Project = {
+		id: string;
+		name: string;
+		created_at: string;
+		workspace_path: string;
+	};
+
+	let projects: Project[] = [];
+	let loading = true;
+	let error = "";
+
+	const apiBase = "http://localhost:8000";
+
+	onMount(async () => {
+		try {
+			const response = await fetch(`${apiBase}/projects`);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			projects = await response.json();
+		} catch (err) {
+			error = err instanceof Error ? err.message : "Failed to load projects";
+		} finally {
+			loading = false;
+		}
+	});
+</script>
+
 <main class="page">
 	<section class="hero">
 		<p class="eyebrow">data-analyst</p>
@@ -15,6 +46,22 @@
 		<div class="card">
 			<h2>Projects</h2>
 			<p>Create isolated workspaces and environments.</p>
+			{#if loading}
+				<p class="muted">Loading projects…</p>
+			{:else if error}
+				<p class="error">{error}</p>
+			{:else if projects.length === 0}
+				<p class="muted">No projects yet.</p>
+			{:else}
+				<ul>
+					{#each projects as project}
+						<li>
+							<strong>{project.name}</strong>
+							<span>{project.workspace_path}</span>
+						</li>
+					{/each}
+				</ul>
+			{/if}
 		</div>
 		<div class="card">
 			<h2>Datasets</h2>
@@ -86,5 +133,40 @@
 	.card p {
 		margin: 0;
 		color: #64748b;
+	}
+
+	.card ul {
+		list-style: none;
+		padding: 0;
+		margin: 12px 0 0;
+		display: grid;
+		gap: 8px;
+	}
+
+	.card li {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		padding: 10px 12px;
+		border-radius: 12px;
+		background: #f1f5f9;
+		font-size: 13px;
+	}
+
+	.card li span {
+		color: #64748b;
+		word-break: break-all;
+	}
+
+	.muted {
+		margin-top: 12px;
+		color: #94a3b8;
+		font-size: 13px;
+	}
+
+	.error {
+		margin-top: 12px;
+		color: #dc2626;
+		font-size: 13px;
 	}
 </style>
