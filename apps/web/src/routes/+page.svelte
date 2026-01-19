@@ -23,8 +23,26 @@
 	let uploadError = "";
 	let uploadMessage = "";
 	let isUploading = false;
+	let datasets: Dataset[] = [];
+	let datasetError = "";
+	let datasetsLoading = false;
+	let selectedDatasetId = "";
+	let runType: RunType = "profile";
+	let runMessage = "";
+	let runError = "";
+	let isRunning = false;
 
 	const apiBase = "http://localhost:8000";
+
+	type Dataset = {
+		id: string;
+		project_id: string;
+		name: string;
+		source: string;
+		created_at: string;
+	};
+
+	type RunType = "ingest" | "profile" | "analysis" | "report";
 
 	onMount(async () => {
 		await loadProjects();
@@ -62,12 +80,42 @@
 			if (!response.ok) {
 				throw new Error(`API error: ${response.status}`);
 			}
+			const created = await response.json();
 			newProjectName = "";
+			if (!selectedProjectId) {
+				selectedProjectId = created.id;
+			}
 			await loadProjects();
 		} catch (err) {
 			createError = err instanceof Error ? err.message : "Failed to create project";
 		} finally {
 			isCreating = false;
+		}
+	};
+
+	const loadDatasets = async (projectId: string) => {
+		datasetsLoading = true;
+		datasetError = "";
+		try {
+			const response = await fetch(`${apiBase}/projects/${projectId}/datasets`);
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			datasets = await response.json();
+		} catch (err) {
+			datasetError = err instanceof Error ? err.message : "Failed to load datasets";
+		} finally {
+			datasetsLoading = false;
+		}
+	};
+
+	const handleProjectSelection = async (value: string) => {
+		selectedProjectId = value;
+		selectedDatasetId = "";
+		if (value) {
+			await loadDatasets(value);
+		} else {
+			datasets = [];
 		}
 	};
 
@@ -98,10 +146,36 @@
 			}
 			uploadMessage = "Dataset uploaded.";
 			uploadFile = null;
+			await loadDatasets(selectedProjectId);
 		} catch (err) {
 			uploadError = err instanceof Error ? err.message : "Upload failed";
 		} finally {
 			isUploading = false;
+		}
+	};
+
+	const createRun = async () => {
+		runMessage = "";
+		runError = "";
+		if (!selectedProjectId || !selectedDatasetId) {
+			runError = "Select a project and dataset.";
+			return;
+		}
+		isRunning = true;
+		try {
+			const response = await fetch(`${apiBase}/projects/${selectedProjectId}/runs`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ dataset_id: selectedDatasetId, type: runType })
+			});
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			runMessage = "Run queued.";
+		} catch (err) {
+			runError = err instanceof Error ? err.message : "Run failed";
+		} finally {
+			isRunning = false;
 		}
 	};
 </script>
@@ -153,7 +227,7 @@
 			<h2>Datasets</h2>
 			<p>Track ingestion sources, profiling, and quality checks.</p>
 			<div class="form">
-				<select bind:value={selectedProjectId} disabled={isUploading}>
+				<select bind:value={selectedProjectId} disabled={isUploading} on:change={(event) => handleProjectSelection((event.target as HTMLSelectElement).value)}>
 					<option value="">Select project</option>
 					{#each projects as project}
 						<option value={project.id}>{project.name}</option>
@@ -171,6 +245,22 @@
 					{isUploading ? "Uploading…" : "Upload"}
 				</button>
 			</div>
+			{#if datasetsLoading}
+				<p class="muted">Loading datasets…</p>
+			{:else if datasetError}
+				<p class="error">{datasetError}</p>
+			{:else if selectedProjectId && datasets.length === 0}
+				<p class="muted">No datasets yet.</p>
+			{:else if datasets.length > 0}
+				<ul>
+					{#each datasets as dataset}
+						<li>
+							<strong>{dataset.name}</strong>
+							<span>{dataset.source}</span>
+						</li>
+					{/each}
+				</ul>
+			{/if}
 			{#if uploadError}
 				<p class="error">{uploadError}</p>
 			{/if}
@@ -181,6 +271,29 @@
 		<div class="card">
 			<h2>Runs</h2>
 			<p>Monitor profiling, analysis, and report runs.</p>
+			<div class="form">
+				<select bind:value={selectedDatasetId} disabled={isRunning}>
+					<option value="">Select dataset</option>
+					{#each datasets as dataset}
+						<option value={dataset.id}>{dataset.name}</option>
+					{/each}
+				</select>
+				<select bind:value={runType} disabled={isRunning}>
+					<option value="ingest">ingest</option>
+					<option value="profile">profile</option>
+					<option value="analysis">analysis</option>
+					<option value="report">report</option>
+				</select>
+				<button on:click={createRun} disabled={isRunning}>
+					{isRunning ? "Queueing…" : "Queue run"}
+				</button>
+			</div>
+			{#if runError}
+				<p class="error">{runError}</p>
+			{/if}
+			{#if runMessage}
+				<p class="success">{runMessage}</p>
+			{/if}
 		</div>
 		<div class="card">
 			<h2>Reports</h2>
