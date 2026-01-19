@@ -6,6 +6,7 @@ from app.routes.datasets import router as datasets_router
 from app.routes.health import router as health_router
 from app.routes.projects import router as projects_router
 from app.routes.runs import router as runs_router
+from app.services.db import init_db
 
 app = FastAPI(title="data-analyst API", version="0.1.0")
 
@@ -15,6 +16,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    init_db()
 
 app.include_router(health_router)
 app.include_router(projects_router, prefix="/projects", tags=["projects"])
