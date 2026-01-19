@@ -450,6 +450,11 @@
 		return matchesType && matchesSearch;
 	});
 
+	$: selectedRunArtifacts = selectedRunId ? artifacts : [];
+	$: selectedRunArtifactTypes = Array.from(
+		new Set(selectedRunArtifacts.map((item) => item.type))
+	).sort();
+
 	$: artifactTypes = Array.from(new Set(artifacts.map((item) => item.type))).sort();
 	$: filteredArtifacts = artifacts.filter((artifact) => {
 		const matchesType = artifactTypeFilter === "all" || artifact.type === artifactTypeFilter;
@@ -476,6 +481,19 @@
 		if (selectedProjectId) {
 			await loadArtifacts(selectedProjectId);
 		}
+	};
+
+	const rerunSelected = async () => {
+		if (!selectedRunId) {
+			return;
+		}
+		const run = runById(selectedRunId);
+		if (!run) {
+			return;
+		}
+		selectedDatasetId = run.dataset_id;
+		runType = run.type;
+		await createRun();
 	};
 
 	const previewArtifact = async (artifactId: string) => {
@@ -834,6 +852,11 @@
 						<span>Type: {runById(selectedRunId)?.type}</span>
 						<span>Status: {runById(selectedRunId)?.status}</span>
 						<span>Dataset: {datasetNameById(runById(selectedRunId)?.dataset_id ?? "")}</span>
+						{#if selectedRunArtifacts.length}
+							<span>Artifacts: {selectedRunArtifacts.length}</span>
+							<span>Types: {selectedRunArtifactTypes.join(", ")}</span>
+						{/if}
+						<button class="secondary" on:click={rerunSelected}>Re-run</button>
 					</div>
 				{/if}
 			{/if}
