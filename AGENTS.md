@@ -9,6 +9,78 @@ This document defines development guidelines for the data‑analyst framework.
 - Isolate projects by default (data, scripts, secrets, environments).
 - Keep the agent layer thin and optional.
 
+## Beads (progress tracking)
+We use Beads (bd) for issues, progress tracking, and run logs. All work must be represented by Beads issues and updated as it progresses.
+
+### Setup (protected branch workflow)
+- Sync branch: `beads-sync` (configured via `bd migrate sync beads-sync`).
+- Only these files are committed on main:
+  - `.beads/.gitignore`
+  - `.gitattributes`
+- Beads issue data is stored on the `beads-sync` branch (`.beads/issues.jsonl`, `.beads/metadata.json`, optional `.beads/config.yaml`).
+- Local runtime files (SQLite db, daemon files) are not committed.
+
+### Daily workflow
+- Create issues for any planned work:
+  - `bd create "Implement CSV ingestion"`
+  - `bd q "Short task"` (quick capture)
+- Start work by updating status:
+  - `bd update <issue-id> --status in_progress`
+- Log decisions, results, and key outputs as comments:
+  - `bd comments add <issue-id> "Summary of result + links"`
+- Mark complete:
+  - `bd update <issue-id> --status done` or `bd close <issue-id>`
+- Sync to the beads branch regularly:
+  - `bd sync`
+
+### Merging beads metadata to main
+- Check status:
+  - `bd sync --status`
+- Create a PR from `beads-sync` → `main` (recommended for protected branches).
+- After merge, update local state:
+  - `git checkout main && git pull`
+  - `bd import`
+
+### Optional daemon
+- `bd daemon start --auto-commit` (commits updates to `beads-sync` automatically).
+- Avoid `--auto-push` unless you want fully automated sync.
+
+## Beads (progress tracking)
+We use Beads (bd) for issues, progress tracking, and run logs. All work must be represented by Beads issues and updated as it progresses.
+
+### Setup (already initialized)
+- Repo is initialized with `bd init`.
+- Sync branch configured: `beads-sync`.
+- Beads metadata lives in `.beads/`.
+
+### Daily workflow
+- Create issues for any planned work:
+  - `bd create "Implement CSV ingestion"`
+  - `bd q "Short task"` (quick capture)
+- Start work by updating status:
+  - `bd update <issue-id> --status in_progress`
+- Log decisions, results, and key outputs as comments:
+  - `bd comments add <issue-id> "Summary of result + links"`
+- Mark complete:
+  - `bd update <issue-id> --status done` or `bd close <issue-id>`
+- Sync to the beads branch regularly:
+  - `bd sync`
+
+### Dependencies and structure
+- Use dependencies to model task order:
+  - `bd dep add <child-id> <parent-id>`
+- Use epics for larger work:
+  - `bd epic create "MVP"` then attach issues to the epic.
+
+### Health checks
+- `bd doctor --fix` if anything looks misconfigured.
+- `bd status` or `bd list` for a quick overview.
+
+### Notes
+- The JSONL files under `.beads/` are tracked; DB/daemon files are ignored.
+- If a clone is missing the sync branch, run `bd migrate sync beads-sync`.
+- Optional editor integration: `bd setup claude` (adds hooks for context injection).
+
 ## Architecture summary
 - **apps/api**: FastAPI service (projects, datasets, runs, artifacts).
 - **apps/web**: Svelte control plane UI.
@@ -69,3 +141,29 @@ This document defines development guidelines for the data‑analyst framework.
 - CSV ingest → profiling → analysis → report with artifacts.
 - UI shows datasets, run history, and reports.
 - Metadata docs generated for each dataset.
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
