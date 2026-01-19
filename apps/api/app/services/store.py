@@ -150,7 +150,7 @@ def list_projects(limit: int = 100, offset: int = 0) -> list[ProjectRead]:
 
 def count_projects() -> int:
     with get_session() as session:
-        total = session.exec(select(func.count(Project.id))).one()
+        total = session.exec(select(func.count()).select_from(Project)).one()
     return int(total)
 
 
@@ -235,7 +235,7 @@ def list_datasets(project_id: str, limit: int = 100, offset: int = 0) -> list[Da
 def count_datasets(project_id: str) -> int:
     with get_session() as session:
         total = session.exec(
-            select(func.count(Dataset.id)).where(Dataset.project_id == project_id)
+            select(func.count()).select_from(Dataset).where(Dataset.project_id == project_id)
         ).one()
     return int(total)
 
@@ -564,7 +564,7 @@ def list_runs(project_id: str, limit: int = 100, offset: int = 0) -> list[RunRea
 def count_runs(project_id: str) -> int:
     with get_session() as session:
         total = session.exec(
-            select(func.count(Run.id)).where(Run.project_id == project_id)
+            select(func.count()).select_from(Run).where(Run.project_id == project_id)
         ).one()
     return int(total)
 
@@ -632,7 +632,12 @@ def list_project_artifacts(
 
 def count_project_artifacts(project_id: str, run_id: str | None = None) -> int:
     with get_session() as session:
-        query = select(func.count(Artifact.id)).join(Run).where(Run.project_id == project_id)
+        query = (
+            select(func.count())
+            .select_from(Artifact)
+            .join(Run, Artifact.run_id == Run.id)
+            .where(Run.project_id == project_id)
+        )
         if run_id:
             query = query.where(Artifact.run_id == run_id)
         total = session.exec(query).one()
