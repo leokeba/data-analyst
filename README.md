@@ -121,6 +121,7 @@ Data‑analyst agent framework for end‑to‑end ingestion, profiling, analysis
 - `POST /projects/{id}/datasets` (ingest)
 - `GET /projects/{id}/datasets`, `GET /projects/{id}/datasets/{dataset_id}`
 - `DELETE /projects/{id}/datasets/{dataset_id}`
+- `GET /projects/{id}/datasets/{dataset_id}/download`
 - `POST /projects/{id}/runs` (profile|analysis|report)
 - `GET /projects/{id}/runs`, `GET /projects/{id}/runs/{run_id}`
 - `DELETE /projects/{id}/runs/{run_id}`

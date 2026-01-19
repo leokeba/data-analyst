@@ -21,6 +21,12 @@ def test_project_dataset_run_flow(client, tmp_path: Path):
     assert dataset_resp.status_code == 201
     dataset = dataset_resp.json()
 
+    download_resp = client.get(
+        f"/projects/{project_id}/datasets/{dataset['id']}/download",
+    )
+    assert download_resp.status_code == 200
+    assert download_resp.text.strip().startswith("a,b")
+
     run_resp = client.post(
         f"/projects/{project_id}/runs",
         json={"dataset_id": dataset["id"], "type": "profile"},

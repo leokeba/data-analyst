@@ -59,15 +59,17 @@ def _resolve_source_path(source: str) -> Path | None:
     return source_path
 
 
-def _maybe_copy_source(project_id: str, source: str) -> None:
+def _maybe_copy_source(project_id: str, source: str) -> Path | None:
     if not _is_probable_file_source(source):
-        return
+        return None
     source_path = Path(source.replace("file://", "")).expanduser().resolve()
     if not source_path.exists() or not source_path.is_file():
         raise FileNotFoundError(f"Source file not found: {source}")
     dest_dir = _repo_root() / "projects" / project_id / "data" / "raw"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_path, dest_dir / source_path.name)
+    dest_path = dest_dir / source_path.name
+    shutil.copy2(source_path, dest_path)
+    return dest_path
 
 
 def _now() -> datetime:
@@ -192,7 +194,9 @@ def _create_dataset_record(project_id: str, payload: DatasetCreate) -> DatasetRe
 
 
 def create_dataset(project_id: str, payload: DatasetCreate) -> DatasetRead:
-    _maybe_copy_source(project_id, payload.source)
+    copied_path = _maybe_copy_source(project_id, payload.source)
+    if copied_path:
+        payload = DatasetCreate(name=payload.name, source=f"file://{copied_path}")
     return _create_dataset_record(project_id, payload)
 
 
@@ -218,6 +222,22 @@ def get_dataset(dataset_id: str) -> DatasetRead | None:
     with get_session() as session:
         dataset = session.get(Dataset, dataset_id)
     return _dataset_read(dataset) if dataset else None
+
+
+def get_dataset_file_path(project_id: str, dataset_id: str) -> Path | None:
+    with get_session() as session:
+        dataset = session.get(Dataset, dataset_id)
+        project = session.get(Project, project_id)
+        if not dataset or not project or dataset.project_id != project_id:
+            return None
+    source_path = _resolve_source_path(dataset.source)
+    if not source_path:
+        return None
+    workspace_root = Path(project.workspace_path).resolve()
+    source_path = source_path.resolve()
+    if not source_path.is_relative_to(workspace_root):
+        return None
+    return source_path
 
 
 def delete_dataset(project_id: str, dataset_id: str) -> None:

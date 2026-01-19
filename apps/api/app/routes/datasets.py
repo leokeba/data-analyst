@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, File, UploadFile
+from fastapi.responses import FileResponse
 
 from app.models.schemas import DatasetCreate, DatasetRead
 from app.services import store
@@ -37,6 +38,21 @@ def delete_dataset(project_id: str, dataset_id: str) -> None:
     if not dataset or dataset.project_id != project_id:
         raise HTTPException(status_code=404, detail="Dataset not found")
     store.delete_dataset(project_id, dataset_id)
+
+
+@router.get("/{dataset_id}/download")
+def download_dataset(project_id: str, dataset_id: str) -> FileResponse:
+    dataset = store.get_dataset(dataset_id)
+    if not dataset or dataset.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    dataset_path = store.get_dataset_file_path(project_id, dataset_id)
+    if not dataset_path:
+        raise HTTPException(status_code=404, detail="Dataset file not available")
+    return FileResponse(
+        path=str(dataset_path),
+        media_type="application/octet-stream",
+        filename=dataset_path.name,
+    )
 
 
 @router.post("/upload", response_model=DatasetRead, status_code=201)

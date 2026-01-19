@@ -691,6 +691,16 @@
 				<div class="summary">
 					<strong>{datasetById(selectedDatasetId)?.name}</strong>
 					<span>Source: {datasetById(selectedDatasetId)?.source}</span>
+					{#if selectedProjectId}
+						<a
+							class="link"
+							href={`${apiBase}/projects/${selectedProjectId}/datasets/${selectedDatasetId}/download`}
+							target="_blank"
+							rel="noreferrer"
+						>
+							Download dataset
+						</a>
+					{/if}
 					{#if datasetById(selectedDatasetId)?.stats}
 						<span>Rows: {datasetById(selectedDatasetId)?.stats?.row_count ?? "—"}</span>
 						<span>Columns: {datasetById(selectedDatasetId)?.stats?.column_count ?? "—"}</span>
