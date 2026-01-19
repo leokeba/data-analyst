@@ -233,7 +233,7 @@ data-analyst/
 ```
 
 ## Next steps
-1. Add pagination controls in UI for projects/datasets/runs/artifacts.
+1. Add total counts for pagination (UI + API).
 2. Add report styling and richer markdown sections.
 3. Add artifact delete confirmation UX.
 4. Add production-ready build steps for web + API.
