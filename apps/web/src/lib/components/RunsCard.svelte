@@ -125,7 +125,7 @@
 			{/each}
 		</ul>
 	{/if}
-	{#if !runsLoading && !runsError && filteredRuns.length}
+	{#if !runsLoading && !runsError && filteredRuns.length && (hasNext || pageOffset > 0)}
 		<div class="pager">
 			<span class="pager__info">
 				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}

@@ -163,7 +163,7 @@
 	{#if datasetActionError}
 		<p class="error">{datasetActionError}</p>
 	{/if}
-	{#if !datasetsLoading && !datasetError && datasets.length}
+	{#if !datasetsLoading && !datasetError && datasets.length && (hasNext || pageOffset > 0)}
 		<div class="pager">
 			<span class="pager__info">
 				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}

@@ -79,7 +79,7 @@
 	{#if projectActionError}
 		<p class="error">{projectActionError}</p>
 	{/if}
-	{#if !loading && !error && projects.length}
+	{#if !loading && !error && projects.length && (hasNext || pageOffset > 0)}
 		<div class="pager">
 			<span class="pager__info">
 				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}

@@ -129,7 +129,7 @@
 			{/each}
 		</ul>
 	{/if}
-	{#if !artifactsLoading && !artifactsError && filteredArtifacts.length}
+	{#if !artifactsLoading && !artifactsError && filteredArtifacts.length && (hasNext || pageOffset > 0)}
 		<div class="pager">
 			<span class="pager__info">
 				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}
