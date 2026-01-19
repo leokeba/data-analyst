@@ -117,6 +117,7 @@ Data‑analyst agent framework for end‑to‑end ingestion, profiling, analysis
 
 ### API surface (v0.1)
 - List endpoints support `limit` + `offset` query params.
+- List endpoints return `X-Total-Count` response header.
 - Errors return JSON: `{ "error": "message", "status_code": <int> }`.
 - `GET /health`
 - `POST /projects`, `GET /projects`, `GET /projects/{id}`, `DELETE /projects/{id}`
