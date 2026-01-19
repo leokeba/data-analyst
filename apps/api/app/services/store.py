@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict
 from uuid import uuid4
 
@@ -21,17 +22,39 @@ _runs: Dict[str, RunRead] = {}
 _artifacts: Dict[str, ArtifactRead] = {}
 
 
+def _repo_root() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "projects").exists():
+            return parent
+    return Path.cwd()
+
+
+def _ensure_project_workspace(project_id: str) -> Path:
+    root = _repo_root() / "projects" / project_id
+    (root / "data" / "raw").mkdir(parents=True, exist_ok=True)
+    (root / "data" / "staging").mkdir(parents=True, exist_ok=True)
+    (root / "data" / "processed").mkdir(parents=True, exist_ok=True)
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    (root / "artifacts").mkdir(parents=True, exist_ok=True)
+    (root / "metadata").mkdir(parents=True, exist_ok=True)
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    (root / "env").mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def create_project(payload: ProjectCreate) -> ProjectRead:
     project_id = uuid4().hex
+    workspace_root = _ensure_project_workspace(project_id)
     project = ProjectRead(
         id=project_id,
         name=payload.name,
         created_at=_now(),
-        workspace_path=f"projects/{project_id}",
+        workspace_path=str(workspace_root),
     )
     _projects[project_id] = project
     return project
@@ -120,6 +143,15 @@ def delete_run(project_id: str, run_id: str) -> None:
 
 def list_artifacts(run_id: str) -> list[ArtifactRead]:
     return [a for a in _artifacts.values() if a.run_id == run_id]
+
+
+def list_project_artifacts(project_id: str, run_id: str | None = None) -> list[ArtifactRead]:
+    project_run_ids = {r.id for r in _runs.values() if r.project_id == project_id}
+    if run_id:
+        if run_id not in project_run_ids:
+            return []
+        project_run_ids = {run_id}
+    return [a for a in _artifacts.values() if a.run_id in project_run_ids]
 
 
 def get_artifact(artifact_id: str) -> ArtifactRead | None:

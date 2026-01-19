@@ -29,7 +29,7 @@ We use Beads (bd) for issues, progress tracking, and run logs. All work must be 
 - Log decisions, results, and key outputs as comments:
   - `bd comments add <issue-id> "Summary of result + links"`
 - Mark complete:
-  - `bd update <issue-id> --status done` or `bd close <issue-id>`
+  - `bd update <issue-id> --status closed` or `bd close <issue-id>`
 - Sync to the beads branch regularly:
   - `bd sync`
 
