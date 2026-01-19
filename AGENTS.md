@@ -9,6 +9,18 @@ This document defines development guidelines for the data‑analyst framework.
 - Isolate projects by default (data, scripts, secrets, environments).
 - Keep the agent layer thin and optional.
 
+## Python tooling (uv)
+We use `uv` for all Python development workflows.
+
+### Dependency management
+- Add dependencies: `uv add <package>`
+- Add dev dependencies: `uv add --dev <package>`
+- Sync environment: `uv sync`
+
+### Running code
+- Run modules or scripts: `uv run python path/to/script.py`
+- Run app locally: `uv run uvicorn app.main:app --reload` (from apps/api)
+
 ## Beads (progress tracking)
 We use Beads (bd) for issues, progress tracking, and run logs. All work must be represented by Beads issues and updated as it progresses.
 

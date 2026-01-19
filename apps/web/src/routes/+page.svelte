@@ -15,10 +15,19 @@
 	let projects: Project[] = [];
 	let loading = true;
 	let error = "";
+	let newProjectName = "";
+	let isCreating = false;
+	let createError = "";
 
 	const apiBase = "http://localhost:8000";
 
 	onMount(async () => {
+		await loadProjects();
+	});
+
+	const loadProjects = async () => {
+		loading = true;
+		error = "";
 		try {
 			const response = await fetch(`${apiBase}/projects`);
 			if (!response.ok) {
@@ -30,7 +39,32 @@
 		} finally {
 			loading = false;
 		}
-	});
+	};
+
+	const createProject = async () => {
+		if (!newProjectName.trim()) {
+			createError = "Project name is required.";
+			return;
+		}
+		isCreating = true;
+		createError = "";
+		try {
+			const response = await fetch(`${apiBase}/projects`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ name: newProjectName.trim() })
+			});
+			if (!response.ok) {
+				throw new Error(`API error: ${response.status}`);
+			}
+			newProjectName = "";
+			await loadProjects();
+		} catch (err) {
+			createError = err instanceof Error ? err.message : "Failed to create project";
+		} finally {
+			isCreating = false;
+		}
+	};
 </script>
 
 <main class="page">
@@ -46,6 +80,19 @@
 		<div class="card">
 			<h2>Projects</h2>
 			<p>Create isolated workspaces and environments.</p>
+			<div class="form">
+				<input
+					placeholder="Project name"
+					bind:value={newProjectName}
+					disabled={isCreating}
+				/>
+				<button on:click={createProject} disabled={isCreating}>
+					{isCreating ? "Creating…" : "Create"}
+				</button>
+			</div>
+			{#if createError}
+				<p class="error">{createError}</p>
+			{/if}
 			{#if loading}
 				<p class="muted">Loading projects…</p>
 			{:else if error}
@@ -133,6 +180,37 @@
 	.card p {
 		margin: 0;
 		color: #64748b;
+	}
+
+	.form {
+		margin-top: 16px;
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.form input {
+		flex: 1 1 180px;
+		padding: 10px 12px;
+		border-radius: 10px;
+		border: 1px solid #cbd5f5;
+		font-size: 14px;
+	}
+
+	.form button {
+		padding: 10px 16px;
+		border-radius: 10px;
+		border: none;
+		background: #1e293b;
+		color: white;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.form button:disabled,
+	.form input:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.card ul {
