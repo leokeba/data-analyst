@@ -44,6 +44,8 @@
 	let runsError = "";
 	let runActionError = "";
 	let deletingRunId = "";
+	let runTypeFilter: RunType | "all" = "all";
+	let runSearch = "";
 	let artifacts: Artifact[] = [];
 	let artifactsLoading = false;
 	let artifactsError = "";
@@ -411,6 +413,13 @@
 
 	const runById = (runId: string) => runs.find((item) => item.id === runId);
 
+	$: filteredRuns = runs.filter((run) => {
+		const matchesType = runTypeFilter === "all" || run.type === runTypeFilter;
+		const haystack = `${run.type} ${run.status} ${run.dataset_id}`.toLowerCase();
+		const matchesSearch = !runSearch.trim() || haystack.includes(runSearch.trim().toLowerCase());
+		return matchesType && matchesSearch;
+	});
+
 	$: artifactTypes = Array.from(new Set(artifacts.map((item) => item.type))).sort();
 	$: filteredArtifacts = artifacts.filter((artifact) => {
 		const matchesType = artifactTypeFilter === "all" || artifact.type === artifactTypeFilter;
@@ -636,6 +645,19 @@
 					{isRunning ? "Queueing…" : "Queue run"}
 				</button>
 			</div>
+			<div class="form">
+				<select bind:value={runTypeFilter}>
+					<option value="all">All types</option>
+					<option value="ingest">ingest</option>
+					<option value="profile">profile</option>
+					<option value="analysis">analysis</option>
+					<option value="report">report</option>
+				</select>
+				<input
+					placeholder="Search runs"
+					bind:value={runSearch}
+				/>
+			</div>
 			{#if runError}
 				<p class="error">{runError}</p>
 			{/if}
@@ -651,9 +673,11 @@
 				<p class="error">{runsError}</p>
 			{:else if selectedProjectId && runs.length === 0}
 				<p class="muted">No runs yet.</p>
-			{:else if runs.length > 0}
+			{:else if filteredRuns.length === 0}
+				<p class="muted">No runs match the filters.</p>
+			{:else if filteredRuns.length > 0}
 				<ul>
-					{#each runs as run}
+					{#each filteredRuns as run}
 						<li>
 							<strong>{run.type} · {run.status}</strong>
 							<span>Dataset: {datasetNameById(run.dataset_id)}</span>
