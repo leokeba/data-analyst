@@ -410,12 +410,22 @@ def _build_report(dataset_id: str) -> dict[str, Path] | None:
             return None
         stats = dataset.stats or {}
         schema = dataset.schema_snapshot or {}
+    analysis = _analyze_dataset(dataset_id) or {}
     workspace = _repo_root() / "projects" / dataset.project_id
     artifacts_dir = workspace / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     report_md = artifacts_dir / f"report-{dataset_id}.md"
     report_html = artifacts_dir / f"report-{dataset_id}.html"
     columns = schema.get("columns", []) if isinstance(schema, dict) else []
+    sample_rows = analysis.get("sample_rows", []) if isinstance(analysis, dict) else []
+    sample_columns = analysis.get("columns", []) if isinstance(analysis, dict) else []
+    sample_table_rows = sample_rows[:5]
+    md_table = "\n"
+    if sample_columns:
+        header_row = "| " + " | ".join(sample_columns) + " |"
+        separator_row = "| " + " | ".join(["---" for _ in sample_columns]) + " |"
+        body_rows = ["| " + " | ".join(row) + " |" for row in sample_table_rows]
+        md_table = "\n".join([header_row, separator_row, *body_rows]) + "\n"
     md = "".join(
         [
             f"# Dataset report\n\n",
@@ -428,9 +438,21 @@ def _build_report(dataset_id: str) -> dict[str, Path] | None:
             "## Columns\n",
             "\n".join([f"- {col.get('name', '')}" for col in columns]) or "- (none)",
             "\n",
+            "\n## Sample rows\n",
+            md_table or "(no sample rows available)\n",
         ]
     )
     report_md.write_text(md)
+    sample_table_html = ""
+    if sample_columns:
+        header_html = "".join([f"<th>{col}</th>" for col in sample_columns])
+        body_html = "".join(
+            [
+                "<tr>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
+                for row in sample_table_rows
+            ]
+        )
+        sample_table_html = f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
     html = "".join(
         [
             "<html><head><meta charset='utf-8'><title>Dataset report</title></head><body>",
@@ -447,6 +469,8 @@ def _build_report(dataset_id: str) -> dict[str, Path] | None:
             "<ul>",
             "".join([f"<li>{col.get('name', '')}</li>" for col in columns]) or "<li>(none)</li>",
             "</ul>",
+            "<h2>Sample rows</h2>",
+            sample_table_html or "<p>(no sample rows available)</p>",
             "</body></html>",
         ]
     )
