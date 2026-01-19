@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from app.models.schemas import ProjectCreate, ProjectRead
 from app.services import store
@@ -12,7 +12,10 @@ def create_project(payload: ProjectCreate) -> ProjectRead:
 
 
 @router.get("", response_model=list[ProjectRead])
-def list_projects(limit: int = 100, offset: int = 0) -> list[ProjectRead]:
+def list_projects(
+    response: Response, limit: int = 100, offset: int = 0
+) -> list[ProjectRead]:
+    response.headers["X-Total-Count"] = str(store.count_projects())
     return store.list_projects(limit=limit, offset=offset)
 
 

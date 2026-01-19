@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 
+from sqlalchemy import func
 from sqlmodel import select
 
 from app.models.db import Artifact, Dataset, Project, Run
@@ -147,6 +148,12 @@ def list_projects(limit: int = 100, offset: int = 0) -> list[ProjectRead]:
     return [_project_read(project) for project in projects]
 
 
+def count_projects() -> int:
+    with get_session() as session:
+        total = session.exec(select(func.count(Project.id))).one()
+    return int(total)
+
+
 def get_project(project_id: str) -> ProjectRead | None:
     with get_session() as session:
         project = session.get(Project, project_id)
@@ -223,6 +230,14 @@ def list_datasets(project_id: str, limit: int = 100, offset: int = 0) -> list[Da
             .limit(limit)
         ).all()
     return [_dataset_read(dataset) for dataset in datasets]
+
+
+def count_datasets(project_id: str) -> int:
+    with get_session() as session:
+        total = session.exec(
+            select(func.count(Dataset.id)).where(Dataset.project_id == project_id)
+        ).one()
+    return int(total)
 
 
 def get_dataset(dataset_id: str) -> DatasetRead | None:
@@ -537,6 +552,14 @@ def list_runs(project_id: str, limit: int = 100, offset: int = 0) -> list[RunRea
     return [_run_read(run) for run in runs]
 
 
+def count_runs(project_id: str) -> int:
+    with get_session() as session:
+        total = session.exec(
+            select(func.count(Run.id)).where(Run.project_id == project_id)
+        ).one()
+    return int(total)
+
+
 def get_run(run_id: str) -> RunRead | None:
     with get_session() as session:
         run = session.get(Run, run_id)
@@ -596,6 +619,15 @@ def list_project_artifacts(
             .limit(limit)
         ).all()
     return [_artifact_read(artifact) for artifact in artifacts]
+
+
+def count_project_artifacts(project_id: str, run_id: str | None = None) -> int:
+    with get_session() as session:
+        query = select(func.count(Artifact.id)).join(Run).where(Run.project_id == project_id)
+        if run_id:
+            query = query.where(Artifact.run_id == run_id)
+        total = session.exec(query).one()
+    return int(total)
 
 
 def get_artifact(artifact_id: str) -> ArtifactRead | None:

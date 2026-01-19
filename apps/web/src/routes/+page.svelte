@@ -55,6 +55,7 @@
 	let projectsLimit = 10;
 	let projectsOffset = 0;
 	let projectsHasNext = false;
+	let projectsTotal: number | null = null;
 
 	// State - Datasets
 	let datasets: Dataset[] = [];
@@ -78,6 +79,7 @@
 	let datasetsLimit = 10;
 	let datasetsOffset = 0;
 	let datasetsHasNext = false;
+	let datasetsTotal: number | null = null;
 
 	// State - Runs
 	let runs: Run[] = [];
@@ -96,6 +98,7 @@
 	let runsLimit = 10;
 	let runsOffset = 0;
 	let runsHasNext = false;
+	let runsTotal: number | null = null;
 
 	// State - Artifacts/Reports
 	let selectedRunArtifacts: Artifact[] = [];
@@ -115,6 +118,7 @@
 	let artifactsLimit = 10;
 	let artifactsOffset = 0;
 	let artifactsHasNext = false;
+	let artifactsTotal: number | null = null;
 
 	// Derived
 	$: if (selectedDatasetId && datasets.length) {
@@ -174,7 +178,11 @@
 			);
 			if (!res.ok) throw new Error('Failed to fetch projects');
 			projects = await res.json();
-			projectsHasNext = projects.length === projectsLimit;
+			const totalHeader = res.headers.get('x-total-count');
+			projectsTotal = totalHeader ? Number(totalHeader) : null;
+			projectsHasNext = projectsTotal !== null
+				? projectsOffset + projectsLimit < projectsTotal
+				: projects.length === projectsLimit;
 		} catch (e) {
 			error = (e as Error).message;
 		} finally {
@@ -261,7 +269,11 @@
 			);
 			if (!res.ok) throw new Error('Failed to fetch datasets');
 			datasets = await res.json();
-			datasetsHasNext = datasets.length === datasetsLimit;
+			const totalHeader = res.headers.get('x-total-count');
+			datasetsTotal = totalHeader ? Number(totalHeader) : null;
+			datasetsHasNext = datasetsTotal !== null
+				? datasetsOffset + datasetsLimit < datasetsTotal
+				: datasets.length === datasetsLimit;
 		} catch (e) {
 			datasetError = (e as Error).message;
 		} finally {
@@ -390,7 +402,11 @@
 			);
 			if (!res.ok) throw new Error('Failed to fetch runs');
 			runs = await res.json();
-			runsHasNext = runs.length === runsLimit;
+			const totalHeader = res.headers.get('x-total-count');
+			runsTotal = totalHeader ? Number(totalHeader) : null;
+			runsHasNext = runsTotal !== null
+				? runsOffset + runsLimit < runsTotal
+				: runs.length === runsLimit;
 		} catch (e) {
 			runsError = (e as Error).message;
 		} finally {
@@ -497,7 +513,11 @@
 			);
 			if (!res.ok) throw new Error('Failed to fetch artifacts');
 			selectedRunArtifacts = await res.json();
-			artifactsHasNext = selectedRunArtifacts.length === artifactsLimit;
+			const totalHeader = res.headers.get('x-total-count');
+			artifactsTotal = totalHeader ? Number(totalHeader) : null;
+			artifactsHasNext = artifactsTotal !== null
+				? artifactsOffset + artifactsLimit < artifactsTotal
+				: selectedRunArtifacts.length === artifactsLimit;
 		} catch (e) {
 			artifactsError = (e as Error).message;
 		} finally {

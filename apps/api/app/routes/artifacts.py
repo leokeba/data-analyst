@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
 
 from app.models.schemas import ArtifactRead
@@ -12,12 +12,16 @@ router = APIRouter()
 @router.get("", response_model=list[ArtifactRead])
 def list_artifacts(
     project_id: str,
+    response: Response,
     run_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[ArtifactRead]:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(
+        store.count_project_artifacts(project_id, run_id)
+    )
     return store.list_project_artifacts(project_id, run_id, limit=limit, offset=offset)
 
 

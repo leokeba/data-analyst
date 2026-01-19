@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from app.models.schemas import RunCreate, RunRead
 from app.services import store
@@ -17,9 +17,12 @@ def create_run(project_id: str, payload: RunCreate) -> RunRead:
 
 
 @router.get("", response_model=list[RunRead])
-def list_runs(project_id: str, limit: int = 100, offset: int = 0) -> list[RunRead]:
+def list_runs(
+    project_id: str, response: Response, limit: int = 100, offset: int = 0
+) -> list[RunRead]:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(store.count_runs(project_id))
     return store.list_runs(project_id, limit=limit, offset=offset)
 
 

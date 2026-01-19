@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, File, UploadFile
+from fastapi import APIRouter, HTTPException, File, UploadFile, Response
 from fastapi.responses import FileResponse
 
 from app.models.schemas import DatasetCreate, DatasetRead
@@ -18,9 +18,12 @@ def create_dataset(project_id: str, payload: DatasetCreate) -> DatasetRead:
 
 
 @router.get("", response_model=list[DatasetRead])
-def list_datasets(project_id: str, limit: int = 100, offset: int = 0) -> list[DatasetRead]:
+def list_datasets(
+    project_id: str, response: Response, limit: int = 100, offset: int = 0
+) -> list[DatasetRead]:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(store.count_datasets(project_id))
     return store.list_datasets(project_id, limit=limit, offset=offset)
 
 
