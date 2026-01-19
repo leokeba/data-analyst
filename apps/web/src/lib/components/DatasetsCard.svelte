@@ -45,6 +45,7 @@
 	export let pageSize = 10;
 	export let pageOffset = 0;
 	export let hasNext = false;
+	export let totalCount: number | null = null;
 	export let onProjectChange: (value: string) => void;
 	export let onUpload: () => void;
 	export let onCreateDataset: () => void;
@@ -57,7 +58,9 @@
 
 	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
 	$: rangeStart = datasets.length ? pageOffset + 1 : 0;
-	$: rangeEnd = pageOffset + datasets.length;
+	$: rangeEnd = totalCount !== null
+		? Math.min(pageOffset + datasets.length, totalCount)
+		: pageOffset + datasets.length;
 </script>
 
 <div class="card">
@@ -166,7 +169,11 @@
 	{#if !datasetsLoading && !datasetError && datasets.length && (hasNext || pageOffset > 0)}
 		<div class="pager">
 			<span class="pager__info">
-				Showing {rangeStart}–{rangeEnd} · Page {pageNumber}
+				{#if totalCount !== null}
+					Showing {rangeStart}–{rangeEnd} of {totalCount} · Page {pageNumber}
+				{:else}
+					Showing {rangeStart}–{rangeEnd} · Page {pageNumber}
+				{/if}
 			</span>
 			<div class="pager__actions">
 				<button class="secondary" on:click={onPrevPage} disabled={pageOffset === 0}>

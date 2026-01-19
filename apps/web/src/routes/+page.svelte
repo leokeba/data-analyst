@@ -595,6 +595,7 @@
 			pageSize={projectsLimit}
 			pageOffset={projectsOffset}
 			hasNext={projectsHasNext}
+			totalCount={projectsTotal}
 			onPrevPage={prevProjectsPage}
 			onNextPage={nextProjectsPage}
 			onCreate={createProject}
@@ -623,6 +624,7 @@
 				pageSize={datasetsLimit}
 				pageOffset={datasetsOffset}
 				hasNext={datasetsHasNext}
+				totalCount={datasetsTotal}
 				onPrevPage={prevDatasetsPage}
 				onNextPage={nextDatasetsPage}
 				onProjectChange={(id) => selectProject(id)}
@@ -667,6 +669,7 @@
 				pageSize={runsLimit}
 				pageOffset={runsOffset}
 				hasNext={runsHasNext}
+				totalCount={runsTotal}
 				onPrevPage={prevRunsPage}
 				onNextPage={nextRunsPage}
 				onCreateRun={createRun}
@@ -698,6 +701,7 @@
 					pageSize={artifactsLimit}
 					pageOffset={artifactsOffset}
 					hasNext={artifactsHasNext}
+					totalCount={artifactsTotal}
 					onPrevPage={prevArtifactsPage}
 					onNextPage={nextArtifactsPage}
 					onPreviewArtifact={onPreviewArtifact}
