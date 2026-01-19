@@ -10,7 +10,10 @@ router = APIRouter()
 def create_dataset(project_id: str, payload: DatasetCreate) -> DatasetRead:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    return store.create_dataset(project_id, payload)
+    try:
+        return store.create_dataset(project_id, payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[DatasetRead])

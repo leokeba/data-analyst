@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
 from uuid import uuid4
+import shutil
 
 from app.models.schemas import (
     ArtifactRead,
@@ -43,6 +44,25 @@ def _ensure_project_workspace(project_id: str) -> Path:
     return root
 
 
+def _is_probable_file_source(source: str) -> bool:
+    if source.startswith("file://"):
+        return True
+    if "://" in source:
+        return False
+    return True
+
+
+def _maybe_copy_source(project_id: str, source: str) -> None:
+    if not _is_probable_file_source(source):
+        return
+    source_path = Path(source.replace("file://", "")).expanduser().resolve()
+    if not source_path.exists() or not source_path.is_file():
+        raise FileNotFoundError(f"Source file not found: {source}")
+    dest_dir = _repo_root() / "projects" / project_id / "data" / "raw"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, dest_dir / source_path.name)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -77,6 +97,7 @@ def delete_project(project_id: str) -> None:
 
 def create_dataset(project_id: str, payload: DatasetCreate) -> DatasetRead:
     dataset_id = uuid4().hex
+    _maybe_copy_source(project_id, payload.source)
     dataset = DatasetRead(
         id=dataset_id,
         project_id=project_id,
