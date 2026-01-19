@@ -51,10 +51,20 @@ def test_project_dataset_run_flow(client, tmp_path: Path):
     artifacts = artifacts_resp.json()
     assert len(artifacts) >= 1
 
+    download_artifact_resp = client.get(
+        f"/projects/{project_id}/artifacts/{artifacts[0]['id']}/download",
+    )
+    assert download_artifact_resp.status_code == 200
+
     delete_artifact_resp = client.delete(
         f"/projects/{project_id}/artifacts/{artifacts[0]['id']}",
     )
     assert delete_artifact_resp.status_code == 204
+
+    delete_run_resp = client.delete(
+        f"/projects/{project_id}/runs/{run['id']}",
+    )
+    assert delete_run_resp.status_code == 204
 
     report_resp = client.post(
         f"/projects/{project_id}/runs",
