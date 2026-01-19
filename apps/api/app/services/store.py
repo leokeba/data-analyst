@@ -492,7 +492,16 @@ def _build_report(dataset_id: str) -> dict[str, Path] | None:
         sample_table_html = f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
     html = "".join(
         [
-            "<html><head><meta charset='utf-8'><title>Dataset report</title></head><body>",
+            "<html><head><meta charset='utf-8'><title>Dataset report</title>",
+            "<style>",
+            "body{font-family:system-ui,-apple-system,sans-serif;margin:32px;color:#18181b;background:#fafafa;}",
+            "h1,h2{margin:0 0 12px 0;} h2{margin-top:24px;}",
+            "p,li{font-size:14px;line-height:1.5;color:#3f3f46;}",
+            "ul{padding-left:20px;}",
+            "table{width:100%;border-collapse:collapse;margin-top:8px;background:white;}",
+            "th,td{border:1px solid #e4e4e7;padding:6px 8px;text-align:left;font-size:12px;}",
+            "th{background:#f4f4f5;font-weight:600;}",
+            "</style></head><body>",
             f"<h1>Dataset report</h1>",
             f"<p><strong>Dataset:</strong> {dataset.name}</p>",
             f"<p><strong>Source:</strong> {dataset.source}</p>",
