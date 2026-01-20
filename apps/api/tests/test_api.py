@@ -197,6 +197,17 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     assert skill_resp.status_code == 201
     skill_id = skill_resp.json()["id"]
 
+    invalid_skill_resp = client.post(
+        f"/projects/{project_id}/agent/skills",
+        json={
+            "name": "Bad skill",
+            "description": "Invalid tool",
+            "toolchain": ["unknown_tool"],
+            "enabled": True,
+        },
+    )
+    assert invalid_skill_resp.status_code == 400
+
     list_skills_resp = client.get(f"/projects/{project_id}/agent/skills")
     assert list_skills_resp.status_code == 200
     assert list_skills_resp.headers.get("x-total-count")

@@ -20,6 +20,18 @@ from app.services import store
 router = APIRouter()
 
 
+def _validate_toolchain(project_id: str, toolchain: list[str] | None) -> None:
+    if not toolchain:
+        return
+    available = {tool.name for tool in agent_service.list_tools(project_id)}
+    unknown = [tool for tool in toolchain if tool not in available]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown tools in toolchain: {', '.join(unknown)}",
+        )
+
+
 @router.post("/runs", response_model=AgentRunRead, status_code=201)
 def create_agent_run(project_id: str, payload: AgentRunCreate) -> AgentRunRead:
     if not store.get_project(project_id):
@@ -196,6 +208,7 @@ def cancel_agent_rollback(project_id: str, rollback_id: str) -> AgentRollbackRea
 def create_agent_skill(project_id: str, payload: AgentSkillCreate) -> AgentSkillRead:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    _validate_toolchain(project_id, payload.toolchain)
     skill = agent_service.create_skill(
         project_id,
         payload.name,
@@ -289,6 +302,8 @@ def update_agent_skill(
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     updates = payload.model_dump(exclude_unset=True)
+    if "toolchain" in updates:
+        _validate_toolchain(project_id, updates["toolchain"])
     skill = agent_service.update_skill(project_id, skill_id, updates)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
