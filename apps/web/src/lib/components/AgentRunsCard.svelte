@@ -166,11 +166,16 @@
 					<span>Steps: {run.plan.steps.length}</span>
 					<span>Completion: {completionPercent(run)}%</span>
 					<span>Run id: {run.id}</span>
+					<span>Log entries: {run.log.length}</span>
 					<div class="card__actions">
 						<button class="secondary" on:click={() => onReplayRun(run)}>
 							Replay
 						</button>
 					</div>
+					<details>
+						<summary class="link">View run log</summary>
+						<pre class="preview">{JSON.stringify(run.log, null, 2)}</pre>
+					</details>
 					{#if run.plan.steps.length}
 						<div class="summary">
 							<strong>Steps</strong>
