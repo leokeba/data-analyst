@@ -64,6 +64,9 @@
 					{#if skill.toolchain?.length}
 						<span>Toolchain: {skill.toolchain.join(", ")}</span>
 					{/if}
+					{#if skill.prompt_template}
+						<span>Prompt: {skill.prompt_template}</span>
+					{/if}
 					<span>Enabled: {skill.enabled ? "Yes" : "No"}</span>
 					<div class="card__actions">
 						<button class="secondary" on:click={() => onRun(skill)}>
