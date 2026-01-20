@@ -27,7 +27,7 @@
 	- ✅ Skills UI shows prompt templates
 	- ✅ Persisted run logs wired to UI (expandable log viewer)
 	- ✅ Tool approval UI: per-step approval prompts (basic)
-	- ⏳ Snapshot/rollback implementation beyond metadata (not started)
+	- ✅ Snapshot/rollback implementation beyond metadata (basic file restore)
 
 ## Goals
 - Safe, auditable agent-assisted workflows for ingest → profile → analyze → correlate → consolidate → report.
