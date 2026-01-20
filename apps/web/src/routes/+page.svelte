@@ -74,6 +74,16 @@
 		details?: Record<string, unknown> | null;
 	};
 
+	type AgentRollback = {
+		id: string;
+		project_id: string;
+		run_id?: string | null;
+		snapshot_id?: string | null;
+		status: string;
+		created_at: string;
+		note?: string | null;
+	};
+
 	// State - Projects
 	let projects: Project[] = [];
 	let loading = true;
@@ -174,6 +184,13 @@
 	let agentSnapshotsOffset = 0;
 	let agentSnapshotsHasNext = false;
 	let agentSnapshotsTotal: number | null = null;
+	let agentRollbacks: AgentRollback[] = [];
+	let agentRollbacksLoading = false;
+	let agentRollbacksError = '';
+	let agentRollbacksLimit = 10;
+	let agentRollbacksOffset = 0;
+	let agentRollbacksHasNext = false;
+	let agentRollbacksTotal: number | null = null;
 
 	// Derived
 	$: if (selectedDatasetId && datasets.length) {
@@ -317,7 +334,8 @@
 			loadRuns(),
 			loadAgentTools(),
 			loadAgentRuns(),
-			loadAgentSnapshots()
+			loadAgentSnapshots(),
+			loadAgentRollbacks()
 		]);
 	}
 
@@ -549,6 +567,40 @@
 		loadAgentSnapshots();
 	}
 
+	async function loadAgentRollbacks() {
+		if (!selectedProjectId) return;
+		agentRollbacksLoading = true;
+		agentRollbacksError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/rollbacks?limit=${agentRollbacksLimit}&offset=${agentRollbacksOffset}`
+			);
+			if (!res.ok) throw new Error('Failed to fetch rollbacks');
+			agentRollbacks = await res.json();
+			const totalHeader = res.headers.get('x-total-count');
+			agentRollbacksTotal = totalHeader ? Number(totalHeader) : null;
+			agentRollbacksHasNext = agentRollbacksTotal !== null
+				? agentRollbacksOffset + agentRollbacksLimit < agentRollbacksTotal
+				: agentRollbacks.length === agentRollbacksLimit;
+		} catch (e) {
+			agentRollbacksError = (e as Error).message;
+		} finally {
+			agentRollbacksLoading = false;
+		}
+	}
+
+	function nextAgentRollbacksPage() {
+		if (!agentRollbacksHasNext) return;
+		agentRollbacksOffset += agentRollbacksLimit;
+		loadAgentRollbacks();
+	}
+
+	function prevAgentRollbacksPage() {
+		if (agentRollbacksOffset === 0) return;
+		agentRollbacksOffset = Math.max(0, agentRollbacksOffset - agentRollbacksLimit);
+		loadAgentRollbacks();
+	}
+
 	async function requestAgentRollback(snapshot: AgentSnapshot) {
 		if (!selectedProjectId) return;
 		if (!confirm('Request rollback for this snapshot?')) return;
@@ -567,6 +619,7 @@
 				}
 			);
 			if (!res.ok) throw new Error('Failed to request rollback');
+			await loadAgentRollbacks();
 		} catch (e) {
 			agentRollbackError = (e as Error).message;
 		}
@@ -943,6 +996,13 @@
 				snapshotsLoading={agentSnapshotsLoading}
 				snapshotsError={agentSnapshotsError}
 				rollbackError={agentRollbackError}
+				rollbacks={agentRollbacks}
+				rollbacksLoading={agentRollbacksLoading}
+				rollbacksError={agentRollbacksError}
+				rollbacksPageSize={agentRollbacksLimit}
+				rollbacksPageOffset={agentRollbacksOffset}
+				rollbacksHasNext={agentRollbacksHasNext}
+				rollbacksTotal={agentRollbacksTotal}
 				snapshotsPageSize={agentSnapshotsLimit}
 				snapshotsPageOffset={agentSnapshotsOffset}
 				snapshotsHasNext={agentSnapshotsHasNext}
@@ -957,11 +1017,14 @@
 					loadAgentTools();
 					loadAgentRuns();
 					loadAgentSnapshots();
+					loadAgentRollbacks();
 				}}
 				onReplayRun={replayAgentRun}
 				onPrevSnapshotsPage={prevAgentSnapshotsPage}
 				onNextSnapshotsPage={nextAgentSnapshotsPage}
 				onRequestRollback={requestAgentRollback}
+				onPrevRollbacksPage={prevAgentRollbacksPage}
+				onNextRollbacksPage={nextAgentRollbacksPage}
 			/>
 		{:else}
 			<div class="welcome">

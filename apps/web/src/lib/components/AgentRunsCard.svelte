@@ -33,6 +33,15 @@
 		details?: Record<string, unknown> | null;
 	};
 
+	type AgentRollback = {
+		id: string;
+		status: string;
+		created_at: string;
+		run_id?: string | null;
+		snapshot_id?: string | null;
+		note?: string | null;
+	};
+
 	export let tools: AgentTool[] = [];
 	export let toolsLoading = false;
 	export let toolsError = "";
@@ -44,6 +53,13 @@
 	export let snapshotsLoading = false;
 	export let snapshotsError = "";
 	export let rollbackError = "";
+	export let rollbacks: AgentRollback[] = [];
+	export let rollbacksLoading = false;
+	export let rollbacksError = "";
+	export let rollbacksPageSize = 10;
+	export let rollbacksPageOffset = 0;
+	export let rollbacksHasNext = false;
+	export let rollbacksTotal: number | null = null;
 	export let snapshotsPageSize = 10;
 	export let snapshotsPageOffset = 0;
 	export let snapshotsHasNext = false;
@@ -78,6 +94,8 @@
 	export let onPrevSnapshotsPage: () => void;
 	export let onNextSnapshotsPage: () => void;
 	export let onRequestRollback: (snapshot: AgentSnapshot) => void;
+	export let onPrevRollbacksPage: () => void;
+	export let onNextRollbacksPage: () => void;
 
 	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
 	$: rangeStart = runs.length ? pageOffset + 1 : 0;
@@ -89,6 +107,11 @@
 	$: snapshotsRangeEnd = snapshotsTotal !== null
 		? Math.min(snapshotsPageOffset + snapshots.length, snapshotsTotal)
 		: snapshotsPageOffset + snapshots.length;
+	$: rollbacksPageNumber = Math.floor(rollbacksPageOffset / rollbacksPageSize) + 1;
+	$: rollbacksRangeStart = rollbacks.length ? rollbacksPageOffset + 1 : 0;
+	$: rollbacksRangeEnd = rollbacksTotal !== null
+		? Math.min(rollbacksPageOffset + rollbacks.length, rollbacksTotal)
+		: rollbacksPageOffset + rollbacks.length;
 </script>
 
 <div class="card">
@@ -245,6 +268,55 @@
 					Previous
 				</button>
 				<button class="secondary" on:click={onNextSnapshotsPage} disabled={!snapshotsHasNext}>
+					Next
+				</button>
+			</div>
+		</div>
+	{/if}
+
+	<div class="summary">
+		<strong>Rollbacks</strong>
+	</div>
+	{#if rollbacksLoading}
+		<p class="muted">Loading rollbacks…</p>
+	{:else if rollbacksError}
+		<p class="error">{rollbacksError}</p>
+	{:else if rollbacks.length === 0}
+		<p class="muted">No rollbacks yet.</p>
+	{:else}
+		<ul>
+			{#each rollbacks as rollback}
+				<li>
+					<strong>Status: {rollback.status}</strong>
+					<span>Created: {new Date(rollback.created_at).toLocaleString()}</span>
+					{#if rollback.run_id}
+						<span>Run: {rollback.run_id}</span>
+					{/if}
+					{#if rollback.snapshot_id}
+						<span>Snapshot: {rollback.snapshot_id}</span>
+					{/if}
+					{#if rollback.note}
+						<span>Note: {rollback.note}</span>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+	{/if}
+
+	{#if !rollbacksLoading && !rollbacksError && rollbacks.length && (rollbacksHasNext || rollbacksPageOffset > 0)}
+		<div class="pager">
+			<span class="pager__info">
+				{#if rollbacksTotal !== null}
+					Showing {rollbacksRangeStart}–{rollbacksRangeEnd} of {rollbacksTotal} · Page {rollbacksPageNumber}
+				{:else}
+					Showing {rollbacksRangeStart}–{rollbacksRangeEnd} · Page {rollbacksPageNumber}
+				{/if}
+			</span>
+			<div class="pager__actions">
+				<button class="secondary" on:click={onPrevRollbacksPage} disabled={rollbacksPageOffset === 0}>
+					Previous
+				</button>
+				<button class="secondary" on:click={onNextRollbacksPage} disabled={!rollbacksHasNext}>
 					Next
 				</button>
 			</div>
