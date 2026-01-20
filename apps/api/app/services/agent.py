@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
+import shutil
 from typing import Any
 from uuid import uuid4
 
@@ -378,6 +380,21 @@ def create_snapshot_record(
         session.add(snapshot)
         session.commit()
         session.refresh(snapshot)
+    project = store.get_project(project_id)
+    if project:
+        source = target_path.replace("file://", "")
+        path = Path(source).expanduser().resolve()
+        workspace_root = Path(project.workspace_path).resolve()
+        if path.is_file() and path.is_relative_to(workspace_root):
+            snapshots_dir = workspace_root / "artifacts" / "snapshots"
+            snapshots_dir.mkdir(parents=True, exist_ok=True)
+            dest_path = snapshots_dir / f"{snapshot.id}-{path.name}"
+            shutil.copy2(path, dest_path)
+            snapshot.details = {**(snapshot.details or {}), "snapshot_path": str(dest_path)}
+            with get_session() as session:
+                session.add(snapshot)
+                session.commit()
+                session.refresh(snapshot)
     return snapshot
 
 

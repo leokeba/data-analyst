@@ -162,7 +162,9 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
         },
     )
     assert create_snapshot_resp.status_code == 201
-    snapshot_id = create_snapshot_resp.json()["id"]
+    snapshot_payload = create_snapshot_resp.json()
+    snapshot_id = snapshot_payload["id"]
+    assert "snapshot_path" in (snapshot_payload.get("details") or {})
 
     restore_resp = client.post(
         f"/projects/{project_id}/agent/snapshots/{snapshot_id}/restore",
