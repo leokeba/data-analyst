@@ -150,22 +150,11 @@ def _tool_list_project_sqlite_factory(project_id: str, policy: AgentPolicy):
     )
 
 
-def _resolve_project_path(project_id: str, policy: AgentPolicy, path_value: str) -> Path:
-    project = store.get_project(project_id)
-    if not project:
-        raise ValueError("Project not found")
-    workspace_root = Path(project.workspace_path).resolve()
-    path = Path(path_value)
-    if not path.is_absolute():
-        path = workspace_root / path_value
-    return validate_path(path, policy)
-
-
 def _tool_list_db_tables_factory(project_id: str, policy: AgentPolicy):
     def _handler(args: dict[str, Any]) -> ToolResult:
         db_path = args.get("db_path")
         if db_path:
-            resolved = _resolve_project_path(project_id, policy, str(db_path))
+            resolved = validate_path(str(db_path), policy)
         else:
             resolved = Path(get_engine().url.database or "").resolve()
         if not resolved.is_file():
@@ -219,7 +208,7 @@ def _tool_query_db_factory(project_id: str, policy: AgentPolicy):
             limit = 200
         db_path = args.get("db_path")
         if db_path:
-            resolved = _resolve_project_path(project_id, policy, str(db_path))
+            resolved = validate_path(str(db_path), policy)
         else:
             resolved = Path(get_engine().url.database or "").resolve()
         if not resolved.is_file():
@@ -246,7 +235,7 @@ def _tool_write_file_factory(project_id: str, policy: AgentPolicy):
         content = str(args.get("content", ""))
         if not path_value:
             raise ValueError("Path is required")
-        resolved = _resolve_project_path(project_id, policy, path_value)
+        resolved = validate_path(path_value, policy)
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content)
         artifact = _upsert_agent_artifact(
@@ -276,7 +265,7 @@ def _tool_write_markdown_factory(project_id: str, policy: AgentPolicy):
         content = str(args.get("content", ""))
         if not path_value:
             raise ValueError("Path is required")
-        resolved = _resolve_project_path(project_id, policy, path_value)
+        resolved = validate_path(path_value, policy)
         if resolved.suffix.lower() != ".md":
             raise ValueError("Markdown files must end with .md")
         resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -313,7 +302,7 @@ def _tool_run_python_factory(project_id: str, policy: AgentPolicy):
         if not code and not path_value:
             raise ValueError("Provide code or a path to a script")
         if path_value:
-            script_path = _resolve_project_path(project_id, policy, str(path_value))
+            script_path = validate_path(str(path_value), policy)
         else:
             scripts_dir = workspace_root / "scripts" / "agent"
             scripts_dir.mkdir(parents=True, exist_ok=True)
