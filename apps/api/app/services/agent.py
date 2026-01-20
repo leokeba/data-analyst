@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -122,6 +123,139 @@ def _tool_list_artifacts_factory(project_id: str):
     return ToolDefinition(
         name="list_artifacts",
         description="List artifacts for the project (optional run_id filter).",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _tool_list_dir_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
+        path_value = args.get("path") or project.workspace_path
+        resolved = validate_path(str(path_value), policy)
+        include_hidden = bool(args.get("include_hidden", False))
+        recursive = bool(args.get("recursive", False))
+        max_entries = int(args.get("max_entries", 200))
+        entries: list[dict[str, Any]] = []
+        iterator = resolved.rglob("*") if recursive else resolved.iterdir()
+        for entry in iterator:
+            name = entry.name
+            if not include_hidden and name.startswith("."):
+                continue
+            entries.append(
+                {
+                    "path": str(entry),
+                    "type": "dir" if entry.is_dir() else "file",
+                    "size": entry.stat().st_size if entry.is_file() else None,
+                }
+            )
+            if len(entries) >= max_entries:
+                break
+        return ToolResult(output={"path": str(resolved), "entries": entries})
+
+    return ToolDefinition(
+        name="list_dir",
+        description="List files and directories in the project workspace.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _tool_read_file_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        path_value = str(args.get("path", ""))
+        if not path_value:
+            raise ValueError("Path is required")
+        resolved = validate_path(path_value, policy)
+        if not resolved.is_file():
+            raise ValueError("File not found")
+        start_line = int(args.get("start_line", 1))
+        end_line = args.get("end_line")
+        max_lines = int(args.get("max_lines", 200))
+        if start_line < 1:
+            start_line = 1
+        if end_line is None:
+            end_line = start_line + max_lines - 1
+        if end_line < start_line:
+            end_line = start_line
+        lines: list[str] = []
+        truncated = False
+        byte_budget = int(args.get("max_bytes", policy.max_data_bytes))
+        bytes_read = 0
+        with resolved.open("r", encoding="utf-8", errors="replace") as handle:
+            for idx, line in enumerate(handle, start=1):
+                if idx < start_line:
+                    continue
+                if idx > end_line:
+                    truncated = True
+                    break
+                bytes_read += len(line.encode("utf-8", errors="ignore"))
+                if bytes_read > byte_budget:
+                    truncated = True
+                    break
+                lines.append(line.rstrip("\n"))
+        return ToolResult(
+            output={
+                "path": str(resolved),
+                "start_line": start_line,
+                "end_line": start_line + len(lines) - 1 if lines else start_line,
+                "lines": lines,
+                "truncated": truncated,
+            }
+        )
+
+    return ToolDefinition(
+        name="read_file",
+        description="Read a file from the project workspace (line range).",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _tool_search_text_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
+        query = str(args.get("query", "")).strip()
+        if not query:
+            raise ValueError("Query is required")
+        path_value = args.get("path") or project.workspace_path
+        resolved = validate_path(str(path_value), policy)
+        is_regex = bool(args.get("is_regex", False))
+        include_hidden = bool(args.get("include_hidden", False))
+        max_results = int(args.get("max_results", 50))
+        pattern = re.compile(query) if is_regex else None
+        results: list[dict[str, Any]] = []
+        for file_path in resolved.rglob("*"):
+            if file_path.is_dir():
+                continue
+            if not include_hidden and file_path.name.startswith("."):
+                continue
+            try:
+                with file_path.open("r", encoding="utf-8", errors="replace") as handle:
+                    for line_no, line in enumerate(handle, start=1):
+                        haystack = line
+                        matched = bool(pattern.search(haystack)) if pattern else query in haystack
+                        if matched:
+                            results.append(
+                                {
+                                    "path": str(file_path),
+                                    "line": line_no,
+                                    "text": line.rstrip("\n"),
+                                }
+                            )
+                            if len(results) >= max_results:
+                                return ToolResult(output={"results": results, "truncated": True})
+            except (UnicodeDecodeError, OSError):
+                continue
+        return ToolResult(output={"results": results, "truncated": False})
+
+    return ToolDefinition(
+        name="search_text",
+        description="Search text in workspace files (string or regex).",
         handler=_handler,
         destructive=False,
     )
@@ -259,6 +393,37 @@ def _tool_write_file_factory(project_id: str, policy: AgentPolicy):
     )
 
 
+def _tool_append_file_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        path_value = str(args.get("path", ""))
+        content = str(args.get("content", ""))
+        if not path_value:
+            raise ValueError("Path is required")
+        resolved = validate_path(path_value, policy)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        with resolved.open("a", encoding="utf-8") as handle:
+            handle.write(content)
+        artifact = _upsert_agent_artifact(
+            project_id,
+            None,
+            None,
+            "text_file",
+            resolved,
+            "text/plain",
+        )
+        return ToolResult(
+            output={"path": str(resolved), "bytes": resolved.stat().st_size},
+            artifacts=[artifact.id],
+        )
+
+    return ToolDefinition(
+        name="append_file",
+        description="Append text to a file in the project workspace.",
+        handler=_handler,
+        destructive=True,
+    )
+
+
 def _tool_write_markdown_factory(project_id: str, policy: AgentPolicy):
     def _handler(args: dict[str, Any]) -> ToolResult:
         path_value = str(args.get("path", ""))
@@ -351,6 +516,52 @@ def _tool_run_python_factory(project_id: str, policy: AgentPolicy):
     return ToolDefinition(
         name="run_python",
         description="Execute a Python script inside the project workspace.",
+        handler=_handler,
+        destructive=True,
+    )
+
+
+def _tool_run_shell_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        if not policy.allow_shell:
+            raise PermissionError("Shell execution is disabled by policy")
+        command = str(args.get("command", "")).strip()
+        if not command:
+            raise ValueError("Command is required")
+        if policy.allowed_shell_commands:
+            allowed = tuple(policy.allowed_shell_commands)
+            if not command.startswith(allowed):
+                raise PermissionError("Command not in allowlist")
+        cwd_value = args.get("cwd")
+        if cwd_value:
+            cwd = validate_path(str(cwd_value), policy)
+        else:
+            project = store.get_project(project_id)
+            if not project:
+                raise ValueError("Project not found")
+            cwd = validate_path(str(project.workspace_path), policy)
+        timeout = int(args.get("timeout", policy.max_shell_seconds))
+        result = subprocess.run(
+            command,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=True,
+        )
+        return ToolResult(
+            output={
+                "command": command,
+                "cwd": str(cwd),
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+        )
+
+    return ToolDefinition(
+        name="run_shell",
+        description="Run a shell command inside the project workspace.",
         handler=_handler,
         destructive=True,
     )
@@ -462,6 +673,21 @@ def _plan_to_payload(plan: Plan) -> AgentPlanCreate:
 
 def _tool_catalog(router: ToolRouter) -> list[dict[str, Any]]:
     arg_hints = {
+        "list_dir": {"path": "string (optional)", "recursive": "bool", "include_hidden": "bool", "max_entries": "int"},
+        "read_file": {
+            "path": "string",
+            "start_line": "int",
+            "end_line": "int (optional)",
+            "max_lines": "int",
+            "max_bytes": "int",
+        },
+        "search_text": {
+            "query": "string",
+            "path": "string (optional)",
+            "is_regex": "bool",
+            "include_hidden": "bool",
+            "max_results": "int",
+        },
         "list_datasets": {},
         "preview_dataset": {"dataset_id": "string"},
         "list_project_runs": {},
@@ -470,8 +696,10 @@ def _tool_catalog(router: ToolRouter) -> list[dict[str, Any]]:
         "list_db_tables": {"db_path": "string (optional)"},
         "query_db": {"sql": "string", "db_path": "string (optional)", "limit": "int"},
         "write_file": {"path": "string", "content": "string"},
+        "append_file": {"path": "string", "content": "string"},
         "write_markdown": {"path": "string", "content": "string"},
         "run_python": {"code": "string (optional)", "path": "string (optional)"},
+        "run_shell": {"command": "string", "cwd": "string (optional)", "timeout": "int"},
         "create_run": {"dataset_id": "string", "type": "ingest|profile|analysis|report"},
         "create_snapshot": {"kind": "string", "path": "string", "run_id": "string (optional)"},
         "request_rollback": {"run_id": "string (optional)", "snapshot_id": "string (optional)"},
@@ -515,8 +743,11 @@ def _compute_status(plan: Plan) -> AgentRunStatus:
 def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
     project = store.get_project(project_id)
     allowed_paths = [project.workspace_path] if project else []
-    policy = AgentPolicy(allowed_paths=allowed_paths)
+    policy = AgentPolicy(allowed_paths=allowed_paths, allow_shell=True)
     router = ToolRouter(policy)
+    router.register(_tool_list_dir_factory(project_id, policy))
+    router.register(_tool_read_file_factory(project_id, policy))
+    router.register(_tool_search_text_factory(project_id, policy))
     router.register(_tool_run_factory(project_id))
     router.register(_tool_preview_factory(project_id))
     router.register(_tool_list_datasets_factory(project_id))
@@ -526,8 +757,10 @@ def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
     router.register(_tool_list_db_tables_factory(project_id, policy))
     router.register(_tool_query_db_factory(project_id, policy))
     router.register(_tool_write_file_factory(project_id, policy))
+    router.register(_tool_append_file_factory(project_id, policy))
     router.register(_tool_write_markdown_factory(project_id, policy))
     router.register(_tool_run_python_factory(project_id, policy))
+    router.register(_tool_run_shell_factory(project_id, policy))
     router.register(_tool_create_snapshot_factory(project_id))
     router.register(_tool_request_rollback_factory(project_id))
     return router, policy

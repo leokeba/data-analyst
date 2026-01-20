@@ -34,6 +34,9 @@ class ToolRouter:
         tool = self._tools[name]
         if tool.destructive and self._policy.require_approval_for_destructive and not approved:
             raise PermissionError(f"Approval required for tool: {name}")
-        if "path" in args:
-            validate_path(args["path"], self._policy)
+        for key, value in args.items():
+            if value is None:
+                continue
+            if key == "path" or key.endswith("_path"):
+                validate_path(value, self._policy)
         return tool.handler(args)

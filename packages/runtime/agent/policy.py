@@ -9,6 +9,9 @@ class AgentPolicy(BaseModel):
     allowed_paths: list[str] = Field(default_factory=list)
     max_data_bytes: int = 50_000_000
     allow_network: bool = False
+    allow_shell: bool = False
+    allowed_shell_commands: list[str] = Field(default_factory=list)
+    max_shell_seconds: int = 30
     require_approval_for_destructive: bool = True
 
 
