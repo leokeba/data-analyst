@@ -178,7 +178,7 @@ def run_plan(project_id: str, payload: AgentPlanCreate, approvals: dict[str, Age
     agent_run = AgentRun(
         project_id=project_id,
         status=status.value,
-        plan=plan.model_dump(),
+        plan=plan.model_dump(mode="json"),
         log=log,
     )
     with get_session() as session:

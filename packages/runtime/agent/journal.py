@@ -41,4 +41,4 @@ class ActionJournal(BaseModel):
         return record
 
     def to_log(self) -> list[dict[str, Any]]:
-        return [record.model_dump() for record in self.records]
+        return [record.model_dump(mode="json") for record in self.records]
