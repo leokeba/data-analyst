@@ -7,6 +7,7 @@
 	import ReportsCard from '$lib/components/ReportsCard.svelte';
 	import AgentRunsCard from '$lib/components/AgentRunsCard.svelte';
 	import AgentSkillsCard from '$lib/components/AgentSkillsCard.svelte';
+	import AgentChatSidebar from '$lib/components/AgentChatSidebar.svelte';
 
 	const apiBase = 'http://localhost:8000';
 
@@ -62,7 +63,15 @@
 				requires_approval?: boolean;
 			}[];
 		};
-		log: Record<string, unknown>[];
+		log: {
+			step_id?: string;
+			status?: string;
+			tool?: string | null;
+			artifacts?: string[];
+			diff?: string | null;
+			approvals?: { approved_by?: string; approved_at?: string; note?: string | null }[];
+			output?: Record<string, unknown> | null;
+		}[];
 	};
 
 	type AgentSnapshot = {
@@ -85,6 +94,18 @@
 		note?: string | null;
 	};
 
+	type AgentArtifact = {
+		id: string;
+		project_id: string;
+		run_id?: string | null;
+		snapshot_id?: string | null;
+		type: string;
+		path: string;
+		mime_type: string;
+		size: number;
+		created_at: string;
+	};
+
 	type AgentSkill = {
 		id: string;
 		project_id: string;
@@ -95,6 +116,21 @@
 		enabled: boolean;
 		created_at: string;
 		updated_at: string;
+	};
+
+	type ChatAttachment = {
+		type: 'dataset_preview' | 'artifact_preview' | 'diff';
+		title: string;
+		content: string;
+		mimeType?: string;
+	};
+
+	type ChatMessage = {
+		id: string;
+		role: 'user' | 'assistant' | 'system';
+		content: string;
+		created_at: string;
+		attachments?: ChatAttachment[];
 	};
 
 	// State - Projects
@@ -204,6 +240,13 @@
 	let agentRollbacksOffset = 0;
 	let agentRollbacksHasNext = false;
 	let agentRollbacksTotal: number | null = null;
+	let agentArtifacts: AgentArtifact[] = [];
+	let agentArtifactsLoading = false;
+	let agentArtifactsError = '';
+	let agentArtifactPreviewContent = '';
+	let agentArtifactPreviewLoading = false;
+	let agentArtifactPreviewId = '';
+	let agentArtifactPreviewMimeType = '';
 	let agentSkills: AgentSkill[] = [];
 	let agentSkillsLoading = false;
 	let agentSkillsError = '';
@@ -213,6 +256,12 @@
 	let skillPromptTemplate = '';
 	let skillToolchain = '';
 	let isCreatingSkill = false;
+	let agentSafeMode = true;
+	let chatMessages: ChatMessage[] = [];
+	let chatInput = '';
+	let chatError = '';
+	let chatLoadingPreview = false;
+	let agentRunPoller: ReturnType<typeof setInterval> | null = null;
 
 	// Derived
 	$: if (selectedDatasetId && datasets.length) {
@@ -258,6 +307,8 @@
 
 	// Initialization
 	onMount(() => {
+		const storedSafeMode = localStorage.getItem('agentSafeMode');
+		agentSafeMode = storedSafeMode ? storedSafeMode === 'true' : true;
 		loadProjects();
 	});
 
@@ -346,20 +397,33 @@
 		selectedDatasetId = '';
 		selectedRunId = '';
 		selectedRunArtifacts = [];
+		agentArtifacts = [];
+		agentArtifactPreviewId = '';
+		agentArtifactPreviewContent = '';
+		agentArtifactPreviewMimeType = '';
+		chatMessages = [];
+		chatInput = '';
 		datasetsOffset = 0;
 		runsOffset = 0;
 		artifactsOffset = 0;
 		agentRunsOffset = 0;
 		agentSnapshotsOffset = 0;
+		agentRollbacksOffset = 0;
+		if (agentRunPoller) {
+			clearInterval(agentRunPoller);
+			agentRunPoller = null;
+		}
 		await Promise.all([
 			loadDatasets(),
 			loadRuns(),
 			loadAgentTools(),
 			loadAgentRuns(),
+			loadAgentArtifacts(),
 			loadAgentSnapshots(),
 			loadAgentRollbacks(),
 			loadAgentSkills()
 		]);
+		startAgentPolling();
 	}
 
 	// Datasets
@@ -553,6 +617,52 @@
 			agentRunsError = (e as Error).message;
 		} finally {
 			agentRunsLoading = false;
+		}
+	}
+
+	async function loadAgentArtifacts() {
+		if (!selectedProjectId) return;
+		agentArtifactsLoading = true;
+		agentArtifactsError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/artifacts?limit=200&offset=0`
+			);
+			if (!res.ok) throw new Error('Failed to fetch agent artifacts');
+			agentArtifacts = await res.json();
+		} catch (e) {
+			agentArtifactsError = (e as Error).message;
+		} finally {
+			agentArtifactsLoading = false;
+		}
+	}
+
+	async function previewAgentArtifact(artifactId: string) {
+		if (!selectedProjectId) return;
+		agentArtifactPreviewId = artifactId;
+		const artifact = agentArtifacts.find((item) => item.id === artifactId);
+		agentArtifactPreviewMimeType = artifact?.mime_type ?? '';
+		agentArtifactPreviewLoading = true;
+		agentArtifactPreviewContent = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/artifacts/${artifactId}/download`
+			);
+			if (!res.ok) throw new Error('Preview not available');
+			const text = await res.text();
+			if (agentArtifactPreviewMimeType.includes('json')) {
+				try {
+					agentArtifactPreviewContent = JSON.stringify(JSON.parse(text), null, 2);
+				} catch {
+					agentArtifactPreviewContent = text;
+				}
+			} else {
+				agentArtifactPreviewContent = text;
+			}
+		} catch (e) {
+			agentArtifactPreviewContent = (e as Error).message;
+		} finally {
+			agentArtifactPreviewLoading = false;
 		}
 	}
 
@@ -850,6 +960,130 @@
 			await loadAgentRollbacks();
 		} catch (e) {
 			agentRollbackError = (e as Error).message;
+		}
+	}
+
+	async function applyAgentRunStep(run: AgentRun, stepId: string) {
+		if (!selectedProjectId || !stepId) return;
+		const step = run.plan.steps.find((item) => item.id === stepId);
+		if (!step) return;
+		const approvedBy = prompt('Approved by', 'ui');
+		if (!approvedBy) return;
+		const note = prompt('Approval note', step.title) ?? undefined;
+		agentRunsActionError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/runs/${run.id}/steps/${stepId}/apply`,
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ approved_by: approvedBy, note })
+				}
+			);
+			if (!res.ok) throw new Error('Failed to apply step');
+			await Promise.all([loadAgentRuns(), loadAgentArtifacts()]);
+		} catch (e) {
+			agentRunsActionError = (e as Error).message;
+		}
+	}
+
+	function toggleAgentSafeMode() {
+		agentSafeMode = !agentSafeMode;
+		localStorage.setItem('agentSafeMode', String(agentSafeMode));
+	}
+
+	function startAgentPolling() {
+		if (agentRunPoller) {
+			clearInterval(agentRunPoller);
+		}
+		agentRunPoller = setInterval(() => {
+			if (agentRuns.some((run) => run.status === 'pending')) {
+				loadAgentRuns();
+				loadAgentArtifacts();
+			}
+		}, 2000);
+	}
+
+	async function undoLatestAgentSnapshot() {
+		if (!agentSnapshots.length) return;
+		const latest = [...agentSnapshots].sort(
+			(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+		)[0];
+		if (!latest) return;
+		await restoreAgentSnapshot(latest);
+	}
+
+	async function redoLatestAgentRun() {
+		if (!agentRuns.length) return;
+		const latest = agentRuns[agentRuns.length - 1];
+		await replayAgentRun(latest);
+	}
+
+	function appendChatMessage(message: ChatMessage) {
+		chatMessages = [...chatMessages, message];
+	}
+
+	function sendChatMessage() {
+		if (!chatInput.trim()) return;
+		const message: ChatMessage = {
+			id: crypto.randomUUID(),
+			role: 'user',
+			content: chatInput.trim(),
+			created_at: new Date().toISOString(),
+		};
+		appendChatMessage(message);
+		chatInput = '';
+	}
+
+	async function attachDatasetPreviewToChat() {
+		if (!selectedDatasetId) return;
+		chatLoadingPreview = true;
+		chatError = '';
+		try {
+			if (!datasetPreviewData) {
+				await previewDataset();
+			}
+			if (!datasetPreviewData) return;
+			const preview = JSON.stringify(datasetPreviewData, null, 2);
+			appendChatMessage({
+				id: crypto.randomUUID(),
+				role: 'assistant',
+				content: `Attached preview for ${selectedDataset?.name ?? 'dataset'}.`,
+				created_at: new Date().toISOString(),
+				attachments: [
+					{ type: 'dataset_preview', title: 'Dataset preview', content: preview, mimeType: 'application/json' }
+				]
+			});
+		} catch (e) {
+			chatError = (e as Error).message;
+		} finally {
+			chatLoadingPreview = false;
+		}
+	}
+
+	async function attachLatestRunLogToChat() {
+		if (!agentArtifacts.length) return;
+		const latestLog = agentArtifacts.find((artifact) => artifact.type === 'agent_run_log');
+		if (!latestLog) return;
+		chatLoadingPreview = true;
+		try {
+			await previewAgentArtifact(latestLog.id);
+			appendChatMessage({
+				id: crypto.randomUUID(),
+				role: 'assistant',
+				content: 'Attached latest agent run log.',
+				created_at: new Date().toISOString(),
+				attachments: [
+					{
+						type: 'artifact_preview',
+						title: 'Agent run log',
+						content: agentArtifactPreviewContent,
+						mimeType: agentArtifactPreviewMimeType
+					}
+				]
+			});
+		} finally {
+			chatLoadingPreview = false;
 		}
 	}
 
@@ -1223,6 +1457,16 @@
 				runsLoading={agentRunsLoading}
 				runsError={agentRunsError}
 				actionError={agentRunsActionError}
+				artifacts={agentArtifacts}
+				artifactsLoading={agentArtifactsLoading}
+				artifactsError={agentArtifactsError}
+				previewArtifactId={agentArtifactPreviewId}
+				previewLoading={agentArtifactPreviewLoading}
+				previewContent={agentArtifactPreviewContent}
+				previewMimeType={agentArtifactPreviewMimeType}
+				apiBase={apiBase}
+				projectId={selectedProjectId}
+				safeMode={agentSafeMode}
 				snapshots={agentSnapshots}
 				snapshotsLoading={agentSnapshotsLoading}
 				snapshotsError={agentSnapshotsError}
@@ -1247,10 +1491,13 @@
 				onRefresh={() => {
 					loadAgentTools();
 					loadAgentRuns();
+					loadAgentArtifacts();
 					loadAgentSnapshots();
 					loadAgentRollbacks();
 				}}
 				onReplayRun={replayAgentRun}
+				onApplyStep={applyAgentRunStep}
+				onPreviewArtifact={previewAgentArtifact}
 				onPrevSnapshotsPage={prevAgentSnapshotsPage}
 				onNextSnapshotsPage={nextAgentSnapshotsPage}
 				onRequestRollback={requestAgentRollback}
@@ -1284,6 +1531,23 @@
 			</div>
 		{/if}
 	</div>
+	<div class="aside">
+		{#if selectedProjectId}
+			<AgentChatSidebar
+				messages={chatMessages}
+				bind:input={chatInput}
+				error={chatError}
+				loadingPreview={chatLoadingPreview}
+				safeMode={agentSafeMode}
+				onToggleSafeMode={toggleAgentSafeMode}
+				onSend={sendChatMessage}
+				onAttachDatasetPreview={attachDatasetPreviewToChat}
+				onAttachRunLog={attachLatestRunLogToChat}
+				onUndo={undoLatestAgentSnapshot}
+				onRedo={redoLatestAgentRun}
+			/>
+		{/if}
+	</div>
 </div>
 
 <style>
@@ -1296,7 +1560,7 @@
 	}
 	.layout {
 		display: grid;
-		grid-template-columns: 320px 1fr;
+		grid-template-columns: 320px 1fr 320px;
 		gap: 24px;
 		max-width: 1400px;
 		margin: 0 auto;
@@ -1307,6 +1571,11 @@
 		gap: 24px;
 	}
 	.main {
+		display: flex;
+		flex-direction: column;
+		gap: 24px;
+	}
+	.aside {
 		display: flex;
 		flex-direction: column;
 		gap: 24px;

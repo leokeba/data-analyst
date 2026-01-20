@@ -120,6 +120,18 @@ class AgentSnapshotCreate(BaseModel):
     details: dict | None = None
 
 
+class AgentArtifactRead(BaseModel):
+    id: str
+    project_id: str
+    run_id: str | None = None
+    snapshot_id: str | None = None
+    type: str
+    path: str
+    mime_type: str
+    size: int
+    created_at: datetime
+
+
 class AgentRollbackCreate(BaseModel):
     run_id: str | None = None
     snapshot_id: str | None = None

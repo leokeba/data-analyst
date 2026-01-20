@@ -67,6 +67,18 @@ class AgentSnapshot(SQLModel, table=True):
     details: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
 
+class AgentArtifact(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    project_id: str = Field(index=True)
+    run_id: Optional[str] = Field(default=None, index=True)
+    snapshot_id: Optional[str] = Field(default=None, index=True)
+    type: str
+    path: str
+    mime_type: str
+    size: int
+    created_at: datetime = Field(default_factory=_now)
+
+
 class AgentRollback(SQLModel, table=True):
     id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
     project_id: str = Field(index=True)

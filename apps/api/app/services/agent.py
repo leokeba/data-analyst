@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import shutil
 from typing import Any
 from uuid import uuid4
 
-from app.models.db import AgentRollback, AgentRun, AgentSkill, AgentSnapshot
+from app.models.db import AgentArtifact, AgentRollback, AgentRun, AgentSkill, AgentSnapshot
 from sqlalchemy import func
 from sqlmodel import select
 from app.models.schemas import (
@@ -123,6 +124,7 @@ def _tool_create_snapshot_factory(project_id: str):
         if not kind or not target_path:
             raise ValueError("Snapshot requires kind and path")
         snapshot = create_snapshot_record(project_id, kind, target_path, run_id, details)
+        artifacts = [artifact.id for artifact in list_agent_artifacts(project_id, snapshot_id=snapshot.id)]
         return ToolResult(
             output={
                 "snapshot": {
@@ -134,7 +136,8 @@ def _tool_create_snapshot_factory(project_id: str):
                     "created_at": snapshot.created_at.isoformat(),
                     "details": snapshot.details,
                 }
-            }
+            },
+            artifacts=artifacts,
         )
 
     return ToolDefinition(
@@ -244,6 +247,90 @@ def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
     return router, policy
 
 
+def _agent_artifacts_dir(project_id: str) -> Path | None:
+    project = store.get_project(project_id)
+    if not project:
+        return None
+    workspace_root = Path(project.workspace_path).resolve()
+    artifacts_dir = workspace_root / "artifacts" / "agent"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    return artifacts_dir
+
+
+def _upsert_agent_artifact(
+    project_id: str,
+    run_id: str | None,
+    snapshot_id: str | None,
+    artifact_type: str,
+    path: Path,
+    mime_type: str,
+) -> AgentArtifact:
+    with get_session() as session:
+        existing = session.exec(
+            select(AgentArtifact)
+            .where(AgentArtifact.project_id == project_id)
+            .where(AgentArtifact.run_id == run_id)
+            .where(AgentArtifact.snapshot_id == snapshot_id)
+            .where(AgentArtifact.type == artifact_type)
+        ).first()
+        if existing:
+            existing.path = str(path)
+            existing.mime_type = mime_type
+            existing.size = path.stat().st_size
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+            return existing
+        artifact = AgentArtifact(
+            project_id=project_id,
+            run_id=run_id,
+            snapshot_id=snapshot_id,
+            type=artifact_type,
+            path=str(path),
+            mime_type=mime_type,
+            size=path.stat().st_size,
+        )
+        session.add(artifact)
+        session.commit()
+        session.refresh(artifact)
+        return artifact
+
+
+def _write_agent_json_artifact(
+    project_id: str,
+    run_id: str | None,
+    snapshot_id: str | None,
+    artifact_type: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> AgentArtifact | None:
+    artifacts_dir = _agent_artifacts_dir(project_id)
+    if not artifacts_dir:
+        return None
+    path = artifacts_dir / filename
+    path.write_text(json.dumps(payload, indent=2))
+    return _upsert_agent_artifact(project_id, run_id, snapshot_id, artifact_type, path, "application/json")
+
+
+def _write_run_artifacts(project_id: str, run_id: str, plan: dict[str, Any], log: list[dict[str, Any]]) -> None:
+    _write_agent_json_artifact(
+        project_id,
+        run_id,
+        None,
+        "agent_run_plan",
+        f"agent-plan-{run_id}.json",
+        plan,
+    )
+    _write_agent_json_artifact(
+        project_id,
+        run_id,
+        None,
+        "agent_run_log",
+        f"agent-log-{run_id}.json",
+        {"run_id": run_id, "log": log},
+    )
+
+
 def list_tools(project_id: str) -> list[AgentToolRead]:
     router, _ = _build_router(project_id)
     return [
@@ -276,6 +363,7 @@ def run_plan(project_id: str, payload: AgentPlanCreate, approvals: dict[str, Age
         session.add(agent_run)
         session.commit()
         session.refresh(agent_run)
+    _write_run_artifacts(project_id, agent_run.id, plan.model_dump(mode="json"), log)
     return AgentRunRead(
         id=agent_run.id,
         project_id=agent_run.project_id,
@@ -334,6 +422,59 @@ def count_runs(project_id: str) -> int:
     return int(total)
 
 
+def apply_run_step(
+    project_id: str,
+    run_id: str,
+    step_id: str,
+    approval: AgentApproval | None,
+) -> AgentRunRead | None:
+    with get_session() as session:
+        record = session.get(AgentRun, run_id)
+    if not record or record.project_id != project_id:
+        return None
+    plan_data = record.plan or {"objective": "", "steps": []}
+    plan = Plan(**plan_data)
+    step = next((item for item in plan.steps if item.id == step_id), None)
+    if not step:
+        return None
+    if step.requires_approval and approval is None:
+        raise ValueError("Approval required for this step")
+    approval_payload = Approval(**approval.model_dump()) if approval else None
+    router, policy = _build_router(project_id)
+    journal = ActionJournal()
+    snapshots = SnapshotStore(policy=policy)
+    runtime = AgentRuntime(router, journal, snapshots)
+    runtime.run_step(plan, step, approval_payload)
+    log = list(record.log or [])
+    log_entry = journal.to_log()[0] if journal.records else None
+    if log_entry:
+        replaced = False
+        for idx in range(len(log) - 1, -1, -1):
+            if log[idx].get("step_id") == step_id:
+                log[idx] = log_entry
+                replaced = True
+                break
+        if not replaced:
+            log.append(log_entry)
+    status = _compute_status(plan)
+    record.plan = plan.model_dump(mode="json")
+    record.log = log
+    record.status = status.value
+    with get_session() as session:
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+    _write_run_artifacts(project_id, record.id, record.plan or {}, record.log or [])
+    plan_payload = _plan_to_payload(plan)
+    return AgentRunRead(
+        id=record.id,
+        project_id=record.project_id,
+        status=AgentRunStatus(record.status),
+        plan=plan_payload,
+        log=record.log or [],
+    )
+
+
 def list_snapshots(project_id: str, limit: int = 100, offset: int = 0) -> list[AgentSnapshot]:
     with get_session() as session:
         snapshots = session.exec(
@@ -344,6 +485,50 @@ def list_snapshots(project_id: str, limit: int = 100, offset: int = 0) -> list[A
             .limit(limit)
         ).all()
     return snapshots
+
+
+def list_agent_artifacts(
+    project_id: str,
+    run_id: str | None = None,
+    snapshot_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[AgentArtifact]:
+    with get_session() as session:
+        query = select(AgentArtifact).where(AgentArtifact.project_id == project_id)
+        if run_id:
+            query = query.where(AgentArtifact.run_id == run_id)
+        if snapshot_id:
+            query = query.where(AgentArtifact.snapshot_id == snapshot_id)
+        artifacts = session.exec(
+            query.order_by(AgentArtifact.created_at).offset(offset).limit(limit)
+        ).all()
+    return artifacts
+
+
+def count_agent_artifacts(
+    project_id: str,
+    run_id: str | None = None,
+    snapshot_id: str | None = None,
+) -> int:
+    with get_session() as session:
+        query = select(func.count()).select_from(AgentArtifact).where(
+            AgentArtifact.project_id == project_id
+        )
+        if run_id:
+            query = query.where(AgentArtifact.run_id == run_id)
+        if snapshot_id:
+            query = query.where(AgentArtifact.snapshot_id == snapshot_id)
+        total = session.exec(query).one()
+    return int(total)
+
+
+def get_agent_artifact(project_id: str, artifact_id: str) -> AgentArtifact | None:
+    with get_session() as session:
+        artifact = session.get(AgentArtifact, artifact_id)
+    if not artifact or artifact.project_id != project_id:
+        return None
+    return artifact
 
 
 def count_snapshots(project_id: str) -> int:
@@ -380,6 +565,23 @@ def create_snapshot_record(
         session.add(snapshot)
         session.commit()
         session.refresh(snapshot)
+    snapshot_payload = {
+        "id": snapshot.id,
+        "project_id": snapshot.project_id,
+        "run_id": snapshot.run_id,
+        "kind": snapshot.kind,
+        "target_path": snapshot.target_path,
+        "created_at": snapshot.created_at.isoformat(),
+        "details": snapshot.details,
+    }
+    _write_agent_json_artifact(
+        project_id,
+        snapshot.run_id,
+        snapshot.id,
+        "snapshot_metadata",
+        f"snapshot-{snapshot.id}.json",
+        snapshot_payload,
+    )
     project = store.get_project(project_id)
     if project:
         source = target_path.replace("file://", "")
@@ -395,6 +597,14 @@ def create_snapshot_record(
                 session.add(snapshot)
                 session.commit()
                 session.refresh(snapshot)
+            _upsert_agent_artifact(
+                project_id,
+                snapshot.run_id,
+                snapshot.id,
+                "snapshot_file",
+                dest_path,
+                "application/octet-stream",
+            )
     return snapshot
 
 

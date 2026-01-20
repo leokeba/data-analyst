@@ -1,6 +1,11 @@
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import FileResponse
 
 from app.models.schemas import (
+    AgentApproval,
+    AgentArtifactRead,
     AgentSkillCreate,
     AgentSkillRead,
     AgentSkillUpdate,
@@ -59,11 +64,94 @@ def get_agent_run(project_id: str, run_id: str) -> AgentRunRead:
     return run
 
 
+@router.post("/runs/{run_id}/steps/{step_id}/apply", response_model=AgentRunRead)
+def apply_agent_run_step(
+    project_id: str, run_id: str, step_id: str, payload: AgentApproval
+) -> AgentRunRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        run = agent_service.apply_run_step(project_id, run_id, step_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    return run
+
+
 @router.get("/tools", response_model=list[AgentToolRead])
 def list_agent_tools(project_id: str) -> list[AgentToolRead]:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     return agent_service.list_tools(project_id)
+
+
+@router.get("/artifacts", response_model=list[AgentArtifactRead])
+def list_agent_artifacts(
+    project_id: str,
+    response: Response,
+    run_id: str | None = None,
+    snapshot_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[AgentArtifactRead]:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(
+        agent_service.count_agent_artifacts(project_id, run_id, snapshot_id)
+    )
+    artifacts = agent_service.list_agent_artifacts(project_id, run_id, snapshot_id, limit, offset)
+    return [
+        AgentArtifactRead(
+            id=artifact.id,
+            project_id=artifact.project_id,
+            run_id=artifact.run_id,
+            snapshot_id=artifact.snapshot_id,
+            type=artifact.type,
+            path=artifact.path,
+            mime_type=artifact.mime_type,
+            size=artifact.size,
+            created_at=artifact.created_at,
+        )
+        for artifact in artifacts
+    ]
+
+
+@router.get("/artifacts/{artifact_id}", response_model=AgentArtifactRead)
+def get_agent_artifact(project_id: str, artifact_id: str) -> AgentArtifactRead:
+    artifact = agent_service.get_agent_artifact(project_id, artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Agent artifact not found")
+    return AgentArtifactRead(
+        id=artifact.id,
+        project_id=artifact.project_id,
+        run_id=artifact.run_id,
+        snapshot_id=artifact.snapshot_id,
+        type=artifact.type,
+        path=artifact.path,
+        mime_type=artifact.mime_type,
+        size=artifact.size,
+        created_at=artifact.created_at,
+    )
+
+
+@router.get("/artifacts/{artifact_id}/download")
+def download_agent_artifact(project_id: str, artifact_id: str) -> FileResponse:
+    project = store.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    artifact = agent_service.get_agent_artifact(project_id, artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Agent artifact not found")
+    artifact_path = Path(artifact.path).resolve()
+    workspace_root = Path(project.workspace_path).resolve()
+    if not artifact_path.is_file() or not artifact_path.is_relative_to(workspace_root):
+        raise HTTPException(status_code=404, detail="Agent artifact not found")
+    return FileResponse(
+        path=str(artifact_path),
+        media_type=artifact.mime_type,
+        filename=artifact_path.name,
+    )
 
 
 @router.get("/snapshots", response_model=list[AgentSnapshotRead])

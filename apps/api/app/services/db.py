@@ -4,7 +4,17 @@ from pathlib import Path
 
 from sqlmodel import SQLModel, Session, create_engine
 
-from app.models.db import AgentRollback, AgentRun, AgentSkill, AgentSnapshot, Artifact, Dataset, Project, Run
+from app.models.db import (
+    AgentArtifact,
+    AgentRollback,
+    AgentRun,
+    AgentSkill,
+    AgentSnapshot,
+    Artifact,
+    Dataset,
+    Project,
+    Run,
+)
 
 
 def _db_path() -> Path:

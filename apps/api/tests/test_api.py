@@ -145,6 +145,16 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     agent_run_get = client.get(f"/projects/{project_id}/agent/runs/{run_id}")
     assert agent_run_get.status_code == 200
 
+    agent_artifacts_resp = client.get(
+        f"/projects/{project_id}/agent/artifacts",
+        params={"run_id": run_id},
+    )
+    assert agent_artifacts_resp.status_code == 200
+    agent_artifacts = agent_artifacts_resp.json()
+    artifact_types = {artifact["type"] for artifact in agent_artifacts}
+    assert "agent_run_log" in artifact_types
+    assert "agent_run_plan" in artifact_types
+
     list_runs_resp = client.get(f"/projects/{project_id}/agent/runs")
     assert list_runs_resp.status_code == 200
     assert list_runs_resp.headers.get("x-total-count")
@@ -171,6 +181,36 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     )
     assert restore_resp.status_code == 200
     assert restore_resp.json()["status"] in {"applied", "failed"}
+
+    pending_plan_payload = {
+        "objective": "Pending approval",
+        "steps": [
+            {
+                "id": "step-approve",
+                "title": "Run profile",
+                "description": "Create a profiling run",
+                "tool": "create_run",
+                "args": {"dataset_id": dataset["id"], "type": "profile"},
+                "requires_approval": True,
+            }
+        ],
+    }
+    pending_run_resp = client.post(
+        f"/projects/{project_id}/agent/runs",
+        json={"plan": pending_plan_payload, "approvals": {}},
+    )
+    assert pending_run_resp.status_code == 201
+    pending_run = pending_run_resp.json()
+    assert pending_run["status"] == "pending"
+
+    apply_step_resp = client.post(
+        f"/projects/{project_id}/agent/runs/{pending_run['id']}/steps/step-approve/apply",
+        json={"approved_by": "tester"},
+    )
+    assert apply_step_resp.status_code == 200
+    applied_run = apply_step_resp.json()
+    assert applied_run["status"] == "completed"
+    assert applied_run["log"][-1]["status"] == "applied"
 
     rollback_resp = client.post(
         f"/projects/{project_id}/agent/rollbacks",

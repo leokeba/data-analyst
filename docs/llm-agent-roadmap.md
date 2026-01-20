@@ -1,7 +1,7 @@
 # LLM agent integration roadmap (v0.3)
 
 ## Progress (current)
-- Phase 1: Core orchestration — **in progress**
+- Phase 1: Core orchestration — **complete**
 	- ✅ Agent runtime skeleton (plan/steps, tool router, journal, snapshots)
 	- ✅ Agent API endpoints: create run, get run, list runs, list tools
 	- ✅ Initial agent tools: create run, preview dataset, list datasets, list project runs, list artifacts, create snapshot, request rollback
@@ -28,6 +28,15 @@
 	- ✅ Persisted run logs wired to UI (expandable log viewer)
 	- ✅ Tool approval UI: per-step approval prompts (basic)
 	- ✅ Snapshot/rollback implementation beyond metadata (basic file restore)
+
+- Phase 2: UX integration — **complete**
+	- ✅ Copilot-style chat sidebar with inline previews (dataset + artifacts)
+	- ✅ Structured plan view with per-step approve/apply/rollback and status chips
+	- ✅ Progress tracking UI with live step status + timeline view tied to run logs
+	- ✅ Inline diffs surfaced from run logs; artifact thumbnails for HTML/images
+	- ✅ Live run log polling with jump-to-artifact and jump-to-diff
+	- ✅ Undo/redo controls (restore latest snapshot, replay latest plan) + safe-mode toggle
+	- ✅ Run logs and snapshots persisted as agent artifacts and linked in the UI
 
 ## Goals
 - Safe, auditable agent-assisted workflows for ingest → profile → analyze → correlate → consolidate → report.

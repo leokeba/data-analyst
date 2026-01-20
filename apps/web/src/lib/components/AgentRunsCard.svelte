@@ -20,12 +20,17 @@
 		log: {
 			step_id?: string;
 			status?: string;
+			tool?: string | null;
+			artifacts?: string[];
+			diff?: string | null;
+			output?: Record<string, unknown> | null;
 			approvals?: { approved_by?: string; approved_at?: string; note?: string | null }[];
 		}[];
 	};
 
 	type AgentSnapshot = {
 		id: string;
+		project_id: string;
 		kind: string;
 		target_path: string;
 		created_at: string;
@@ -35,11 +40,23 @@
 
 	type AgentRollback = {
 		id: string;
+		project_id: string;
 		status: string;
 		created_at: string;
 		run_id?: string | null;
 		snapshot_id?: string | null;
 		note?: string | null;
+	};
+
+	type AgentArtifact = {
+		id: string;
+		run_id?: string | null;
+		snapshot_id?: string | null;
+		type: string;
+		path: string;
+		mime_type: string;
+		size: number;
+		created_at: string;
 	};
 
 	export let tools: AgentTool[] = [];
@@ -60,6 +77,16 @@
 	export let rollbacksPageOffset = 0;
 	export let rollbacksHasNext = false;
 	export let rollbacksTotal: number | null = null;
+	export let artifacts: AgentArtifact[] = [];
+	export let artifactsLoading = false;
+	export let artifactsError = "";
+	export let previewArtifactId = "";
+	export let previewLoading = false;
+	export let previewContent = "";
+	export let previewMimeType = "";
+	export let apiBase = "";
+	export let projectId = "";
+	export let safeMode = true;
 	export let snapshotsPageSize = 10;
 	export let snapshotsPageOffset = 0;
 	export let snapshotsHasNext = false;
@@ -99,6 +126,8 @@
 	export let onNextRollbacksPage: () => void;
 	export let onApplyRollback: (rollback: AgentRollback) => void;
 	export let onCancelRollback: (rollback: AgentRollback) => void;
+	export let onApplyStep: (run: AgentRun, stepId: string) => void;
+	export let onPreviewArtifact: (artifactId: string) => void;
 
 	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
 	$: rangeStart = runs.length ? pageOffset + 1 : 0;
@@ -115,6 +144,24 @@
 	$: rollbacksRangeEnd = rollbacksTotal !== null
 		? Math.min(rollbacksPageOffset + rollbacks.length, rollbacksTotal)
 		: rollbacksPageOffset + rollbacks.length;
+
+	$: artifactsByRun = (runId: string) =>
+		artifacts.filter((artifact) => artifact.run_id === runId);
+
+	const statusClass = (status: string) => {
+		if (status === "applied" || status === "completed") return "success";
+		if (status === "failed") return "failure";
+		if (status === "pending" || status === "approved") return "running";
+		return "";
+	};
+
+	const artifactUrl = (artifactId: string) =>
+		`${apiBase}/projects/${projectId}/agent/artifacts/${artifactId}/download`;
+
+	const previewable = (artifact: AgentArtifact) =>
+		artifact.mime_type.includes("json") ||
+		artifact.mime_type.includes("text") ||
+		artifact.mime_type.includes("html");
 </script>
 
 <div class="card">
@@ -138,6 +185,10 @@
 			<span>{tools.length} tools</span>
 		{/if}
 	</div>
+
+	{#if safeMode}
+		<p class="muted">Safe mode is enabled: destructive actions require explicit approval.</p>
+	{/if}
 
 	{#if tools.length}
 		<ul>
@@ -165,7 +216,10 @@
 			{#each runs as run}
 				<li>
 					<strong>{run.plan.objective || "Untitled plan"}</strong>
-					<span>Status: {run.status}</span>
+					<span>
+						Status:
+						<span class={`tag ${statusClass(run.status)}`}>{run.status}</span>
+					</span>
 					<span>Steps: {run.plan.steps.length}</span>
 					<span>Completion: {completionPercent(run)}%</span>
 					<span>Run id: {run.id}</span>
@@ -179,6 +233,43 @@
 						<summary class="link">View run log</summary>
 						<pre class="preview">{JSON.stringify(run.log, null, 2)}</pre>
 					</details>
+					{#if run.log.length}
+						<div class="summary">
+							<strong>Timeline</strong>
+							<ul>
+								{#each run.log as entry}
+									<li>
+										<strong>{entry.tool ?? "Step"}</strong>
+										<span>
+											Status:
+											<span class={`tag ${statusClass(entry.status ?? "pending")}`}>
+												{entry.status ?? "pending"}
+											</span>
+										</span>
+										{#if entry.artifacts?.length}
+											<span>Artifacts: {entry.artifacts.length}</span>
+											<div class="card__actions">
+												{#each entry.artifacts as artifactId}
+													<button
+														class="secondary"
+														on:click={() => onPreviewArtifact(artifactId)}
+													>
+														Preview artifact
+													</button>
+												{/each}
+											</div>
+										{/if}
+										{#if entry.diff}
+											<details>
+												<summary class="link">View diff</summary>
+												<pre class="preview">{entry.diff}</pre>
+											</details>
+										{/if}
+									</li>
+							{/each}
+						</ul>
+					</div>
+					{/if}
 					{#if run.plan.steps.length}
 						<div class="summary">
 							<strong>Steps</strong>
@@ -191,11 +282,89 @@
 										{#if step.requires_approval}
 											<span>Approval required</span>
 										{/if}
-										<span>Status: {stepStatus(run, step.id)}</span>
+										<span>
+											Status:
+											<span class={`tag ${statusClass(stepStatus(run, step.id))}`}>
+												{stepStatus(run, step.id)}
+											</span>
+										</span>
 										{#if entry?.approvals?.length}
 											<span>
 												Approvals: {entry.approvals.length}
 											</span>
+										{/if}
+										{#if entry?.output && typeof entry.output === 'object' && (entry.output as any).snapshot}
+											{@const snapshotOutput = (entry.output as any).snapshot}
+											{#if snapshotOutput?.id}
+												<div class="card__actions">
+													<button class="secondary" on:click={() => onRestoreSnapshot({
+														id: snapshotOutput.id,
+														project_id: projectId,
+														kind: snapshotOutput.kind ?? 'snapshot',
+														target_path: snapshotOutput.target_path ?? '',
+														created_at: snapshotOutput.created_at ?? '',
+														run_id: snapshotOutput.run_id ?? null,
+														details: snapshotOutput.details ?? null
+													})}>
+														Restore
+													</button>
+													<button class="secondary" on:click={() => onRequestRollback({
+														id: snapshotOutput.id,
+														project_id: projectId,
+														kind: snapshotOutput.kind ?? 'snapshot',
+														target_path: snapshotOutput.target_path ?? '',
+														created_at: snapshotOutput.created_at ?? '',
+														run_id: snapshotOutput.run_id ?? null,
+														details: snapshotOutput.details ?? null
+													})}>
+														Rollback
+													</button>
+												</div>
+											{/if}
+										{/if}
+										{#if stepStatus(run, step.id) === "pending"}
+											<div class="card__actions">
+												<button
+													class="secondary"
+													on:click={() => onApplyStep(run, step.id ?? "")}
+												>
+													Approve & apply
+												</button>
+											</div>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
+					{#if artifactsLoading}
+						<p class="muted">Loading artifacts…</p>
+					{:else if artifactsError}
+						<p class="error">{artifactsError}</p>
+					{:else if artifactsByRun(run.id).length}
+						<div class="summary">
+							<strong>Artifacts</strong>
+							<ul>
+								{#each artifactsByRun(run.id) as artifact}
+									<li>
+										<strong>{artifact.type}</strong>
+										<span>{artifact.mime_type}</span>
+										<span>{new Date(artifact.created_at).toLocaleString()}</span>
+										{#if previewable(artifact)}
+											<div class="card__actions">
+												<button class="secondary" on:click={() => onPreviewArtifact(artifact.id)}>
+													Preview
+												</button>
+												<a class="link" href={artifactUrl(artifact.id)} target="_blank" rel="noreferrer">
+													Download
+												</a>
+											</div>
+										{/if}
+										{#if artifact.mime_type.startsWith("image/")}
+											<img class="artifact-thumb" src={artifactUrl(artifact.id)} alt={artifact.type} />
+										{/if}
+										{#if artifact.mime_type.includes("html")}
+											<iframe class="preview__frame" src={artifactUrl(artifact.id)} title={artifact.type}></iframe>
 										{/if}
 									</li>
 								{/each}
@@ -343,4 +512,26 @@
 			</div>
 		</div>
 	{/if}
+
+	{#if previewArtifactId}
+		<div class="summary">
+			<strong>Artifact preview</strong>
+		</div>
+		{#if previewLoading}
+			<p class="muted">Loading preview…</p>
+		{:else if previewMimeType.includes("html")}
+			<iframe class="preview__frame" src={artifactUrl(previewArtifactId)} title="Artifact preview"></iframe>
+		{:else}
+			<pre class="preview">{previewContent}</pre>
+		{/if}
+	{/if}
 </div>
+
+<style>
+	.artifact-thumb {
+		width: 120px;
+		border-radius: 6px;
+		border: 1px solid #e4e4e7;
+		background: #fafafa;
+	}
+</style>

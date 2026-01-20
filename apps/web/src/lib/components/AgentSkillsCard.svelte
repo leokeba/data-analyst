@@ -1,6 +1,7 @@
 <script lang="ts">
 	type AgentSkill = {
 		id: string;
+		project_id: string;
 		name: string;
 		description: string;
 		prompt_template?: string | null;
