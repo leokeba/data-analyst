@@ -10,7 +10,12 @@
 		status: string;
 		plan: {
 			objective: string;
-			steps: { id?: string; title: string; tool?: string | null }[];
+			steps: {
+				id?: string;
+				title: string;
+				tool?: string | null;
+				requires_approval?: boolean;
+			}[];
 		};
 		log: {
 			step_id?: string;
@@ -25,6 +30,7 @@
 	export let runs: AgentRun[] = [];
 	export let runsLoading = false;
 	export let runsError = "";
+	export let actionError = "";
 	export let pageSize = 10;
 	export let pageOffset = 0;
 	export let hasNext = false;
@@ -51,6 +57,7 @@
 		return Math.round((applied / run.plan.steps.length) * 100);
 	}
 	export let onRefresh: () => void;
+	export let onReplayRun: (run: AgentRun) => void;
 
 	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
 	$: rangeStart = runs.length ? pageOffset + 1 : 0;
@@ -111,9 +118,17 @@
 					<span>Steps: {run.plan.steps.length}</span>
 					<span>Completion: {completionPercent(run)}%</span>
 					<span>Run id: {run.id}</span>
+					<div class="card__actions">
+						<button class="secondary" on:click={() => onReplayRun(run)}>
+							Replay
+						</button>
+					</div>
 					{#if run.plan.steps.length}
 						<div class="summary">
 							<strong>Steps</strong>
+								{#if actionError}
+									<p class="error">{actionError}</p>
+								{/if}
 							<ul>
 								{#each run.plan.steps as step}
 									{@const entry = stepLog(run, step.id)}

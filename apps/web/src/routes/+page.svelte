@@ -54,7 +54,12 @@
 		status: string;
 		plan: {
 			objective: string;
-			steps: { id?: string; title: string; tool?: string | null }[];
+			steps: {
+				id?: string;
+				title: string;
+				tool?: string | null;
+				requires_approval?: boolean;
+			}[];
 		};
 		log: Record<string, unknown>[];
 	};
@@ -146,6 +151,7 @@
 	let agentRuns: AgentRun[] = [];
 	let agentRunsLoading = false;
 	let agentRunsError = '';
+	let agentRunsActionError = '';
 	let agentRunsLimit = 10;
 	let agentRunsOffset = 0;
 	let agentRunsHasNext = false;
@@ -481,6 +487,32 @@
 			agentRunsError = (e as Error).message;
 		} finally {
 			agentRunsLoading = false;
+		}
+	}
+
+	async function replayAgentRun(run: AgentRun) {
+		if (!selectedProjectId) return;
+		if (!confirm('Replay this agent plan?')) return;
+		agentRunsActionError = '';
+		try {
+			const approvals: Record<string, { approved_by: string; note?: string }> = {};
+			for (const step of run.plan.steps) {
+				if (step.requires_approval && step.id) {
+					approvals[step.id] = { approved_by: 'ui', note: 'replay' };
+				}
+			}
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/runs`,
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ plan: run.plan, approvals })
+				}
+			);
+			if (!res.ok) throw new Error('Failed to replay agent run');
+			await loadAgentRuns();
+		} catch (e) {
+			agentRunsActionError = (e as Error).message;
 		}
 	}
 
@@ -822,6 +854,7 @@
 				runs={agentRuns}
 				runsLoading={agentRunsLoading}
 				runsError={agentRunsError}
+				actionError={agentRunsActionError}
 				pageSize={agentRunsLimit}
 				pageOffset={agentRunsOffset}
 				hasNext={agentRunsHasNext}
@@ -832,6 +865,7 @@
 					loadAgentTools();
 					loadAgentRuns();
 				}}
+				onReplayRun={replayAgentRun}
 			/>
 		{:else}
 			<div class="welcome">
