@@ -120,17 +120,7 @@ def _tool_create_snapshot_factory(project_id: str):
         details = args.get("metadata") if isinstance(args.get("metadata"), dict) else None
         if not kind or not target_path:
             raise ValueError("Snapshot requires kind and path")
-        snapshot = AgentSnapshot(
-            project_id=project_id,
-            run_id=run_id,
-            kind=kind,
-            target_path=target_path,
-            details=details,
-        )
-        with get_session() as session:
-            session.add(snapshot)
-            session.commit()
-            session.refresh(snapshot)
+        snapshot = create_snapshot_record(project_id, kind, target_path, run_id, details)
         return ToolResult(
             output={
                 "snapshot": {
@@ -362,6 +352,35 @@ def count_snapshots(project_id: str) -> int:
     return int(total)
 
 
+def get_snapshot(project_id: str, snapshot_id: str) -> AgentSnapshot | None:
+    with get_session() as session:
+        snapshot = session.get(AgentSnapshot, snapshot_id)
+    if not snapshot or snapshot.project_id != project_id:
+        return None
+    return snapshot
+
+
+def create_snapshot_record(
+    project_id: str,
+    kind: str,
+    target_path: str,
+    run_id: str | None,
+    details: dict | None,
+) -> AgentSnapshot:
+    snapshot = AgentSnapshot(
+        project_id=project_id,
+        run_id=run_id,
+        kind=kind,
+        target_path=target_path,
+        details=details,
+    )
+    with get_session() as session:
+        session.add(snapshot)
+        session.commit()
+        session.refresh(snapshot)
+    return snapshot
+
+
 def create_rollback(project_id: str, run_id: str | None, snapshot_id: str | None, note: str | None) -> AgentRollback:
     rollback = AgentRollback(
         project_id=project_id,
@@ -369,6 +388,24 @@ def create_rollback(project_id: str, run_id: str | None, snapshot_id: str | None
         snapshot_id=snapshot_id,
         status="requested",
         note=note,
+    )
+    with get_session() as session:
+        session.add(rollback)
+        session.commit()
+        session.refresh(rollback)
+    return rollback
+
+
+def restore_snapshot(project_id: str, snapshot_id: str) -> AgentRollback | None:
+    snapshot = get_snapshot(project_id, snapshot_id)
+    if not snapshot:
+        return None
+    rollback = AgentRollback(
+        project_id=project_id,
+        run_id=snapshot.run_id,
+        snapshot_id=snapshot.id,
+        status="applied",
+        note="restore snapshot",
     )
     with get_session() as session:
         session.add(rollback)

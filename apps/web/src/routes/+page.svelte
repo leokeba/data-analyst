@@ -764,6 +764,22 @@
 		}
 	}
 
+	async function restoreAgentSnapshot(snapshot: AgentSnapshot) {
+		if (!selectedProjectId) return;
+		if (!confirm('Restore this snapshot?')) return;
+		agentRollbackError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/snapshots/${snapshot.id}/restore`,
+				{ method: 'POST' }
+			);
+			if (!res.ok) throw new Error('Failed to restore snapshot');
+			await Promise.all([loadAgentRollbacks(), loadAgentSnapshots()]);
+		} catch (e) {
+			agentRollbackError = (e as Error).message;
+		}
+	}
+
 	async function applyAgentRollback(rollback: AgentRollback) {
 		if (!selectedProjectId) return;
 		if (!confirm('Mark this rollback as applied?')) return;
@@ -1194,6 +1210,7 @@
 				onPrevSnapshotsPage={prevAgentSnapshotsPage}
 				onNextSnapshotsPage={nextAgentSnapshotsPage}
 				onRequestRollback={requestAgentRollback}
+				onRestoreSnapshot={restoreAgentSnapshot}
 				onPrevRollbacksPage={prevAgentRollbacksPage}
 				onNextRollbacksPage={nextAgentRollbacksPage}
 				onApplyRollback={applyAgentRollback}

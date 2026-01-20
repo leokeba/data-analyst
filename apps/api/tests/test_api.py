@@ -152,6 +152,23 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     snapshots_resp = client.get(f"/projects/{project_id}/agent/snapshots")
     assert snapshots_resp.status_code == 200
 
+    create_snapshot_resp = client.post(
+        f"/projects/{project_id}/agent/snapshots",
+        json={
+            "kind": "dataset",
+            "target_path": dataset["source"],
+            "run_id": None,
+            "details": {"note": "test"},
+        },
+    )
+    assert create_snapshot_resp.status_code == 201
+    snapshot_id = create_snapshot_resp.json()["id"]
+
+    restore_resp = client.post(
+        f"/projects/{project_id}/agent/snapshots/{snapshot_id}/restore",
+    )
+    assert restore_resp.status_code == 200
+
     rollback_resp = client.post(
         f"/projects/{project_id}/agent/rollbacks",
         json={"note": "test rollback"},

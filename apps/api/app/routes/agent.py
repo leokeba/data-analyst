@@ -8,6 +8,7 @@ from app.models.schemas import (
     AgentRollbackRead,
     AgentRunCreate,
     AgentRunRead,
+    AgentSnapshotCreate,
     AgentSnapshotRead,
     AgentToolRead,
     AgentPlanCreate,
@@ -73,6 +74,48 @@ def list_agent_snapshots(
         )
         for snapshot in snapshots
     ]
+
+
+@router.post("/snapshots", response_model=AgentSnapshotRead, status_code=201)
+def create_agent_snapshot(
+    project_id: str, payload: AgentSnapshotCreate
+) -> AgentSnapshotRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    snapshot = agent_service.create_snapshot_record(
+        project_id,
+        payload.kind,
+        payload.target_path,
+        payload.run_id,
+        payload.details,
+    )
+    return AgentSnapshotRead(
+        id=snapshot.id,
+        project_id=snapshot.project_id,
+        run_id=snapshot.run_id,
+        kind=snapshot.kind,
+        target_path=snapshot.target_path,
+        created_at=snapshot.created_at,
+        details=snapshot.details,
+    )
+
+
+@router.post("/snapshots/{snapshot_id}/restore", response_model=AgentRollbackRead)
+def restore_agent_snapshot(project_id: str, snapshot_id: str) -> AgentRollbackRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    rollback = agent_service.restore_snapshot(project_id, snapshot_id)
+    if not rollback:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    return AgentRollbackRead(
+        id=rollback.id,
+        project_id=rollback.project_id,
+        run_id=rollback.run_id,
+        snapshot_id=rollback.snapshot_id,
+        status=rollback.status,
+        created_at=rollback.created_at,
+        note=rollback.note,
+    )
 
 
 @router.post("/rollbacks", response_model=AgentRollbackRead, status_code=201)

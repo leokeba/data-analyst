@@ -113,6 +113,13 @@ class AgentSnapshotRead(BaseModel):
     details: dict | None = None
 
 
+class AgentSnapshotCreate(BaseModel):
+    kind: str
+    target_path: str
+    run_id: str | None = None
+    details: dict | None = None
+
+
 class AgentRollbackCreate(BaseModel):
     run_id: str | None = None
     snapshot_id: str | None = None

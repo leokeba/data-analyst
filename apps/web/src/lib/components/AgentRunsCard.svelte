@@ -94,6 +94,7 @@
 	export let onPrevSnapshotsPage: () => void;
 	export let onNextSnapshotsPage: () => void;
 	export let onRequestRollback: (snapshot: AgentSnapshot) => void;
+	export let onRestoreSnapshot: (snapshot: AgentSnapshot) => void;
 	export let onPrevRollbacksPage: () => void;
 	export let onNextRollbacksPage: () => void;
 	export let onApplyRollback: (rollback: AgentRollback) => void;
@@ -249,6 +250,9 @@
 						<span>Run: {snapshot.run_id}</span>
 					{/if}
 					<div class="card__actions">
+						<button class="secondary" on:click={() => onRestoreSnapshot(snapshot)}>
+							Restore
+						</button>
 						<button class="secondary" on:click={() => onRequestRollback(snapshot)}>
 							Request rollback
 						</button>
