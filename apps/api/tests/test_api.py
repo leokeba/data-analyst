@@ -170,6 +170,7 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
         f"/projects/{project_id}/agent/snapshots/{snapshot_id}/restore",
     )
     assert restore_resp.status_code == 200
+    assert restore_resp.json()["status"] in {"applied", "failed"}
 
     rollback_resp = client.post(
         f"/projects/{project_id}/agent/rollbacks",

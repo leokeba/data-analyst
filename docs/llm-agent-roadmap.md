@@ -13,6 +13,7 @@
 	- ✅ Snapshot create + restore endpoints (record-only)
 	- ✅ Snapshot restore action wired in UI (record-only)
 	- ✅ Snapshot file copies stored in artifacts (basic)
+	- ✅ Snapshot restore performs file copy (best-effort)
 	- ✅ Rollback request endpoint (record-only)
 	- ✅ Rollback request action wired in UI (record-only)
 	- ✅ Rollback request list surfaced in agent UI

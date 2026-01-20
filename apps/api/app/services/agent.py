@@ -428,6 +428,32 @@ def restore_snapshot(project_id: str, snapshot_id: str) -> AgentRollback | None:
         session.add(rollback)
         session.commit()
         session.refresh(rollback)
+    project = store.get_project(project_id)
+    if project:
+        workspace_root = Path(project.workspace_path).resolve()
+        target_path = Path(snapshot.target_path.replace("file://", "")).resolve()
+        snapshot_path = None
+        if isinstance(snapshot.details, dict):
+            snapshot_path_value = snapshot.details.get("snapshot_path")
+            if isinstance(snapshot_path_value, str):
+                snapshot_path = Path(snapshot_path_value).resolve()
+        if (
+            snapshot_path
+            and snapshot_path.is_file()
+            and snapshot_path.is_relative_to(workspace_root)
+            and target_path.is_relative_to(workspace_root)
+        ):
+            try:
+                shutil.copy2(snapshot_path, target_path)
+            except Exception as exc:  # pragma: no cover - safety net
+                with get_session() as session:
+                    rollback = session.get(AgentRollback, rollback.id)
+                    if rollback:
+                        rollback.status = "failed"
+                        rollback.note = f"restore failed: {exc}"
+                        session.add(rollback)
+                        session.commit()
+                        session.refresh(rollback)
     return rollback
 
 
