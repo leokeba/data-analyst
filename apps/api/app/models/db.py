@@ -75,3 +75,15 @@ class AgentRollback(SQLModel, table=True):
     status: str
     created_at: datetime = Field(default_factory=_now)
     note: Optional[str] = None
+
+
+class AgentSkill(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    project_id: str = Field(index=True)
+    name: str
+    description: str
+    prompt_template: Optional[str] = None
+    toolchain: Optional[list[str]] = Field(default=None, sa_column=Column(JSON))
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)

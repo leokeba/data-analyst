@@ -129,6 +129,34 @@ class AgentRollbackRead(BaseModel):
     note: str | None = None
 
 
+class AgentSkillCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(..., min_length=1, max_length=500)
+    prompt_template: str | None = None
+    toolchain: list[str] | None = None
+    enabled: bool = True
+
+
+class AgentSkillUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, min_length=1, max_length=500)
+    prompt_template: str | None = None
+    toolchain: list[str] | None = None
+    enabled: bool | None = None
+
+
+class AgentSkillRead(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    description: str
+    prompt_template: str | None = None
+    toolchain: list[str] | None = None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 class AgentToolRead(BaseModel):
     name: str
     description: str

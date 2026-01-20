@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from app.models.db import AgentRollback, AgentRun, AgentSnapshot
+from app.models.db import AgentRollback, AgentRun, AgentSkill, AgentSnapshot
 from sqlalchemy import func
 from sqlmodel import select
 from app.models.schemas import (
@@ -414,3 +415,78 @@ def set_rollback_status(project_id: str, rollback_id: str, status: str) -> Agent
         session.commit()
         session.refresh(rollback)
         return rollback
+
+
+def create_skill(
+    project_id: str,
+    name: str,
+    description: str,
+    prompt_template: str | None,
+    toolchain: list[str] | None,
+    enabled: bool,
+) -> AgentSkill:
+    skill = AgentSkill(
+        project_id=project_id,
+        name=name,
+        description=description,
+        prompt_template=prompt_template,
+        toolchain=toolchain,
+        enabled=enabled,
+    )
+    with get_session() as session:
+        session.add(skill)
+        session.commit()
+        session.refresh(skill)
+    return skill
+
+
+def list_skills(project_id: str, limit: int = 100, offset: int = 0) -> list[AgentSkill]:
+    with get_session() as session:
+        skills = session.exec(
+            select(AgentSkill)
+            .where(AgentSkill.project_id == project_id)
+            .order_by(AgentSkill.created_at)
+            .offset(offset)
+            .limit(limit)
+        ).all()
+    return skills
+
+
+def count_skills(project_id: str) -> int:
+    with get_session() as session:
+        total = session.exec(
+            select(func.count()).select_from(AgentSkill).where(AgentSkill.project_id == project_id)
+        ).one()
+    return int(total)
+
+
+def get_skill(project_id: str, skill_id: str) -> AgentSkill | None:
+    with get_session() as session:
+        skill = session.get(AgentSkill, skill_id)
+    if not skill or skill.project_id != project_id:
+        return None
+    return skill
+
+
+def update_skill(project_id: str, skill_id: str, payload: dict[str, Any]) -> AgentSkill | None:
+    with get_session() as session:
+        skill = session.get(AgentSkill, skill_id)
+        if not skill or skill.project_id != project_id:
+            return None
+        for key, value in payload.items():
+            setattr(skill, key, value)
+        skill.updated_at = datetime.now(timezone.utc)
+        session.add(skill)
+        session.commit()
+        session.refresh(skill)
+        return skill
+
+
+def delete_skill(project_id: str, skill_id: str) -> bool:
+    with get_session() as session:
+        skill = session.get(AgentSkill, skill_id)
+        if not skill or skill.project_id != project_id:
+            return False
+        session.delete(skill)
+        session.commit()
+    return True

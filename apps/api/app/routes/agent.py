@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Response
 
 from app.models.schemas import (
+    AgentSkillCreate,
+    AgentSkillRead,
+    AgentSkillUpdate,
     AgentRollbackCreate,
     AgentRollbackRead,
     AgentRunCreate,
@@ -142,3 +145,104 @@ def cancel_agent_rollback(project_id: str, rollback_id: str) -> AgentRollbackRea
         created_at=rollback.created_at,
         note=rollback.note,
     )
+
+
+@router.post("/skills", response_model=AgentSkillRead, status_code=201)
+def create_agent_skill(project_id: str, payload: AgentSkillCreate) -> AgentSkillRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    skill = agent_service.create_skill(
+        project_id,
+        payload.name,
+        payload.description,
+        payload.prompt_template,
+        payload.toolchain,
+        payload.enabled,
+    )
+    return AgentSkillRead(
+        id=skill.id,
+        project_id=skill.project_id,
+        name=skill.name,
+        description=skill.description,
+        prompt_template=skill.prompt_template,
+        toolchain=skill.toolchain,
+        enabled=skill.enabled,
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
+    )
+
+
+@router.get("/skills", response_model=list[AgentSkillRead])
+def list_agent_skills(
+    project_id: str, response: Response, limit: int = 100, offset: int = 0
+) -> list[AgentSkillRead]:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(agent_service.count_skills(project_id))
+    skills = agent_service.list_skills(project_id, limit=limit, offset=offset)
+    return [
+        AgentSkillRead(
+            id=skill.id,
+            project_id=skill.project_id,
+            name=skill.name,
+            description=skill.description,
+            prompt_template=skill.prompt_template,
+            toolchain=skill.toolchain,
+            enabled=skill.enabled,
+            created_at=skill.created_at,
+            updated_at=skill.updated_at,
+        )
+        for skill in skills
+    ]
+
+
+@router.get("/skills/{skill_id}", response_model=AgentSkillRead)
+def get_agent_skill(project_id: str, skill_id: str) -> AgentSkillRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    skill = agent_service.get_skill(project_id, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return AgentSkillRead(
+        id=skill.id,
+        project_id=skill.project_id,
+        name=skill.name,
+        description=skill.description,
+        prompt_template=skill.prompt_template,
+        toolchain=skill.toolchain,
+        enabled=skill.enabled,
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
+    )
+
+
+@router.patch("/skills/{skill_id}", response_model=AgentSkillRead)
+def update_agent_skill(
+    project_id: str, skill_id: str, payload: AgentSkillUpdate
+) -> AgentSkillRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    updates = payload.model_dump(exclude_unset=True)
+    skill = agent_service.update_skill(project_id, skill_id, updates)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return AgentSkillRead(
+        id=skill.id,
+        project_id=skill.project_id,
+        name=skill.name,
+        description=skill.description,
+        prompt_template=skill.prompt_template,
+        toolchain=skill.toolchain,
+        enabled=skill.enabled,
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
+    )
+
+
+@router.delete("/skills/{skill_id}", status_code=204)
+def delete_agent_skill(project_id: str, skill_id: str) -> None:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    deleted = agent_service.delete_skill(project_id, skill_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Skill not found")

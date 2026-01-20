@@ -166,3 +166,29 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
 
     rollbacks_resp = client.get(f"/projects/{project_id}/agent/rollbacks")
     assert rollbacks_resp.status_code == 200
+
+    skill_resp = client.post(
+        f"/projects/{project_id}/agent/skills",
+        json={
+            "name": "Profile skill",
+            "description": "Run profiling workflow",
+            "prompt_template": "Profile dataset {dataset_id}",
+            "toolchain": ["list_datasets", "create_run"],
+            "enabled": True,
+        },
+    )
+    assert skill_resp.status_code == 201
+    skill_id = skill_resp.json()["id"]
+
+    list_skills_resp = client.get(f"/projects/{project_id}/agent/skills")
+    assert list_skills_resp.status_code == 200
+    assert list_skills_resp.headers.get("x-total-count")
+
+    update_skill_resp = client.patch(
+        f"/projects/{project_id}/agent/skills/{skill_id}",
+        json={"enabled": False},
+    )
+    assert update_skill_resp.status_code == 200
+
+    delete_skill_resp = client.delete(f"/projects/{project_id}/agent/skills/{skill_id}")
+    assert delete_skill_resp.status_code == 204
