@@ -23,6 +23,7 @@ from app.models.schemas import (
     AgentPlanStepCreate,
 )
 from app.services import agent as agent_service
+from packages.runtime.agent import LLMError
 from app.services import store
 
 router = APIRouter()
@@ -115,13 +116,16 @@ def list_agent_chat_messages(
 def send_agent_chat_message(project_id: str, payload: AgentChatSend) -> AgentChatSendResponse:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    user_message, assistant_message, run = agent_service.send_chat_message(
-        project_id,
-        payload.content,
-        payload.dataset_id,
-        payload.safe_mode,
-        payload.auto_run,
-    )
+    try:
+        user_message, assistant_message, run = agent_service.send_chat_message(
+            project_id,
+            payload.content,
+            payload.dataset_id,
+            payload.safe_mode,
+            payload.auto_run,
+        )
+    except LLMError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return AgentChatSendResponse(
         messages=[
             AgentChatMessageRead(

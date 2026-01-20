@@ -4,6 +4,7 @@ from .agent import (
 	AgentPolicy,
 	AgentRole,
 	Approval,
+	LLMError,
 	Plan,
 	PlanStep,
 	SnapshotRef,
@@ -13,6 +14,7 @@ from .agent import (
 	ToolRouter,
 	AgentRuntime,
 	SnapshotStore,
+	generate_plan,
 	repo_root,
 	validate_path,
 )
@@ -23,6 +25,7 @@ __all__ = [
 	"AgentPolicy",
 	"AgentRole",
 	"Approval",
+	"LLMError",
 	"Plan",
 	"PlanStep",
 	"SnapshotRef",
@@ -32,6 +35,7 @@ __all__ = [
 	"ToolRouter",
 	"AgentRuntime",
 	"SnapshotStore",
+	"generate_plan",
 	"repo_root",
 	"validate_path",
 ]

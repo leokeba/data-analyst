@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from app.services import agent as agent_service
+from packages.runtime.agent import llm as llm_module
+
 
 def test_health(client):
     response = client.get("/health")
@@ -91,7 +94,7 @@ def test_project_dataset_run_flow(client, tmp_path: Path):
     assert delete_project_resp.status_code == 204
 
 
-def test_agent_run_executes_plan(client, tmp_path: Path):
+def test_agent_run_executes_plan(client, tmp_path: Path, monkeypatch):
     project = client.post("/projects", json={"name": "Agent Project"}).json()
     project_id = project["id"]
 
@@ -260,6 +263,29 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
         json={"enabled": False},
     )
     assert update_skill_resp.status_code == 200
+
+    def _fake_generate_plan(prompt, tool_catalog, dataset_id, safe_mode, max_steps=8):
+        return llm_module.PlanPayload(
+            objective="Chat test",
+            steps=[
+                llm_module.PlanStepPayload(
+                    title="List datasets",
+                    description="List datasets",
+                    tool="list_datasets",
+                    args={},
+                    requires_approval=False,
+                ),
+                llm_module.PlanStepPayload(
+                    title="Preview dataset",
+                    description="Preview dataset",
+                    tool="preview_dataset",
+                    args={"dataset_id": dataset["id"]},
+                    requires_approval=False,
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(agent_service, "generate_plan", _fake_generate_plan)
 
     chat_send_resp = client.post(
         f"/projects/{project_id}/agent/chat",

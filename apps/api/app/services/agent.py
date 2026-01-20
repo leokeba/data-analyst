@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import shutil
+import sqlite3
+import subprocess
 from typing import Any
 from uuid import uuid4
 
@@ -27,12 +29,13 @@ from app.models.schemas import (
     RunCreate,
 )
 from app.services import store
-from app.services.db import get_session
+from app.services.db import get_engine, get_session
 from packages.runtime.agent import (
     ActionJournal,
     AgentPolicy,
     AgentRuntime,
     Approval,
+    LLMError,
     Plan,
     PlanStep,
     StepStatus,
@@ -40,6 +43,8 @@ from packages.runtime.agent import (
     ToolResult,
     ToolRouter,
     SnapshotStore,
+    generate_plan,
+    validate_path,
 )
 
 
@@ -119,6 +124,235 @@ def _tool_list_artifacts_factory(project_id: str):
         description="List artifacts for the project (optional run_id filter).",
         handler=_handler,
         destructive=False,
+    )
+
+
+def _tool_list_project_sqlite_factory(project_id: str, policy: AgentPolicy):
+    def _handler(_: dict[str, Any]) -> ToolResult:
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
+        workspace_root = Path(project.workspace_path).resolve()
+        candidates: list[str] = []
+        for pattern in ("*.db", "*.sqlite", "*.sqlite3"):
+            for match in workspace_root.rglob(pattern):
+                if match.is_file():
+                    candidates.append(str(match))
+                if len(candidates) >= 50:
+                    break
+        return ToolResult(output={"sqlite_files": candidates})
+
+    return ToolDefinition(
+        name="list_project_sqlite",
+        description="List SQLite files in the project workspace.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _tool_list_db_tables_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        db_path = args.get("db_path")
+        if db_path:
+            resolved = validate_path(str(db_path), policy)
+        else:
+            resolved = Path(get_engine().url.database or "").resolve()
+        if not resolved.is_file():
+            raise ValueError("Database file not found")
+        tables: list[dict[str, Any]] = []
+        with sqlite3.connect(str(resolved)) as conn:
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            for (name,) in cursor.fetchall():
+                columns = conn.execute(f"PRAGMA table_info({name})").fetchall()
+                tables.append(
+                    {
+                        "name": name,
+                        "columns": [
+                            {"name": col[1], "type": col[2], "nullable": col[3] == 0}
+                            for col in columns
+                        ],
+                    }
+                )
+        return ToolResult(output={"db_path": str(resolved), "tables": tables})
+
+    return ToolDefinition(
+        name="list_db_tables",
+        description="List tables and columns from a SQLite database.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _is_readonly_sql(sql: str) -> bool:
+    lowered = sql.strip().lower()
+    if not lowered:
+        return False
+    if lowered.startswith("select") or lowered.startswith("with"):
+        blocked = ("insert", "update", "delete", "drop", "alter", "create", "pragma")
+        return not any(token in lowered for token in blocked)
+    return False
+
+
+def _tool_query_db_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        sql = str(args.get("sql", "")).strip()
+        if not sql:
+            raise ValueError("SQL is required")
+        cleaned = sql.rstrip("; ")
+        if ";" in cleaned:
+            raise ValueError("Only single SQL statements are allowed")
+        if not _is_readonly_sql(cleaned):
+            raise ValueError("Only read-only SELECT queries are allowed")
+        limit = int(args.get("limit", 200))
+        if limit <= 0:
+            limit = 200
+        db_path = args.get("db_path")
+        if db_path:
+            resolved = validate_path(str(db_path), policy)
+        else:
+            resolved = Path(get_engine().url.database or "").resolve()
+        if not resolved.is_file():
+            raise ValueError("Database file not found")
+        with sqlite3.connect(str(resolved)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(cleaned)
+            rows = cursor.fetchmany(limit)
+            columns = [col[0] for col in cursor.description or []]
+            payload = [dict(row) for row in rows]
+        return ToolResult(output={"db_path": str(resolved), "columns": columns, "rows": payload})
+
+    return ToolDefinition(
+        name="query_db",
+        description="Run a read-only SQL query against a SQLite database.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _tool_write_file_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        path_value = str(args.get("path", ""))
+        content = str(args.get("content", ""))
+        if not path_value:
+            raise ValueError("Path is required")
+        resolved = validate_path(path_value, policy)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content)
+        artifact = _upsert_agent_artifact(
+            project_id,
+            None,
+            None,
+            "text_file",
+            resolved,
+            "text/plain",
+        )
+        return ToolResult(
+            output={"path": str(resolved), "bytes": resolved.stat().st_size},
+            artifacts=[artifact.id],
+        )
+
+    return ToolDefinition(
+        name="write_file",
+        description="Write a text file to the project workspace.",
+        handler=_handler,
+        destructive=True,
+    )
+
+
+def _tool_write_markdown_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        path_value = str(args.get("path", ""))
+        content = str(args.get("content", ""))
+        if not path_value:
+            raise ValueError("Path is required")
+        resolved = validate_path(path_value, policy)
+        if resolved.suffix.lower() != ".md":
+            raise ValueError("Markdown files must end with .md")
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content)
+        artifact = _upsert_agent_artifact(
+            project_id,
+            None,
+            None,
+            "markdown",
+            resolved,
+            "text/markdown",
+        )
+        return ToolResult(
+            output={"path": str(resolved), "bytes": resolved.stat().st_size},
+            artifacts=[artifact.id],
+        )
+
+    return ToolDefinition(
+        name="write_markdown",
+        description="Write a markdown report in the project workspace.",
+        handler=_handler,
+        destructive=True,
+    )
+
+
+def _tool_run_python_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
+        workspace_root = Path(project.workspace_path).resolve()
+        code = args.get("code")
+        path_value = args.get("path")
+        if not code and not path_value:
+            raise ValueError("Provide code or a path to a script")
+        if path_value:
+            script_path = validate_path(str(path_value), policy)
+        else:
+            scripts_dir = workspace_root / "scripts" / "agent"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            script_path = scripts_dir / f"agent-script-{uuid4().hex}.py"
+            script_path.write_text(str(code))
+        result = subprocess.run(
+            ["uv", "run", "python", str(script_path)],
+            cwd=str(Path(__file__).resolve().parents[4]),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output_text = "".join(
+            [
+                "STDOUT:\n",
+                result.stdout or "",
+                "\nSTDERR:\n",
+                result.stderr or "",
+            ]
+        )
+        artifacts_dir = _agent_artifacts_dir(project_id)
+        if not artifacts_dir:
+            raise ValueError("Artifacts directory unavailable")
+        out_path = artifacts_dir / f"agent-python-{uuid4().hex}.txt"
+        out_path.write_text(output_text)
+        artifact = _upsert_agent_artifact(
+            project_id,
+            None,
+            None,
+            "python_run_output",
+            out_path,
+            "text/plain",
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Python script failed: {result.stderr}")
+        return ToolResult(
+            output={
+                "path": str(script_path),
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+            artifacts=[artifact.id],
+        )
+
+    return ToolDefinition(
+        name="run_python",
+        description="Execute a Python script inside the project workspace.",
+        handler=_handler,
+        destructive=True,
     )
 
 
@@ -226,74 +460,41 @@ def _plan_to_payload(plan: Plan) -> AgentPlanCreate:
     )
 
 
-def _chat_prompt_to_plan(
-    prompt: str,
-    dataset_id: str | None,
-    router: ToolRouter,
-    safe_mode: bool,
-) -> AgentPlanCreate:
-    prompt_lower = prompt.lower()
-    available = {tool.name: tool for tool in router.list_tools()}
-    used_tools: set[str] = set()
-    steps: list[AgentPlanStepCreate] = []
+def _tool_catalog(router: ToolRouter) -> list[dict[str, Any]]:
+    arg_hints = {
+        "list_datasets": {},
+        "preview_dataset": {"dataset_id": "string"},
+        "list_project_runs": {},
+        "list_artifacts": {"run_id": "string", "limit": "int", "offset": "int"},
+        "list_project_sqlite": {},
+        "list_db_tables": {"db_path": "string (optional)"},
+        "query_db": {"sql": "string", "db_path": "string (optional)", "limit": "int"},
+        "write_file": {"path": "string", "content": "string"},
+        "write_markdown": {"path": "string", "content": "string"},
+        "run_python": {"code": "string (optional)", "path": "string (optional)"},
+        "create_run": {"dataset_id": "string", "type": "ingest|profile|analysis|report"},
+        "create_snapshot": {"kind": "string", "path": "string", "run_id": "string (optional)"},
+        "request_rollback": {"run_id": "string (optional)", "snapshot_id": "string (optional)"},
+    }
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "args": arg_hints.get(tool.name, {}),
+            "destructive": tool.destructive,
+        }
+        for tool in router.list_tools()
+    ]
 
-    def add_step(tool_name: str, title: str, description: str, args: dict[str, Any] | None = None) -> None:
-        if tool_name not in available or tool_name in used_tools:
-            return
-        tool = available[tool_name]
-        requires_approval = safe_mode and tool.destructive
-        steps.append(
-            AgentPlanStepCreate(
-                title=title,
-                description=description,
-                tool=tool_name,
-                args=args or {},
-                requires_approval=requires_approval,
-            )
-        )
-        used_tools.add(tool_name)
 
-    if "list datasets" in prompt_lower or ("datasets" in prompt_lower and "list" in prompt_lower):
-        add_step("list_datasets", "List datasets", "List datasets in the project")
-
-    if "preview" in prompt_lower and dataset_id:
-        add_step(
-            "preview_dataset",
-            "Preview dataset",
-            "Preview a dataset sample",
-            {"dataset_id": dataset_id},
-        )
-
-    if "list runs" in prompt_lower or ("runs" in prompt_lower and "list" in prompt_lower):
-        add_step("list_project_runs", "List runs", "List data runs for the project")
-
-    if "artifacts" in prompt_lower and ("list" in prompt_lower or "show" in prompt_lower):
-        add_step("list_artifacts", "List artifacts", "List project artifacts")
-
-    run_type = None
-    if "ingest" in prompt_lower:
-        run_type = "ingest"
-    elif "profile" in prompt_lower:
-        run_type = "profile"
-    elif "analysis" in prompt_lower or "analyze" in prompt_lower:
-        run_type = "analysis"
-    elif "report" in prompt_lower:
-        run_type = "report"
-
-    if run_type and dataset_id:
-        add_step(
-            "create_run",
-            f"Create {run_type} run",
-            f"Create a {run_type} run for the dataset",
-            {"dataset_id": dataset_id, "type": run_type},
-        )
-        if safe_mode:
-            steps[-1].requires_approval = True
-
-    objective = "Chat request"
-    if prompt.strip():
-        objective = prompt.strip()[:120]
-    return AgentPlanCreate(objective=objective, steps=steps)
+def _apply_safe_mode(plan: AgentPlanCreate, router: ToolRouter, safe_mode: bool) -> AgentPlanCreate:
+    if not safe_mode:
+        return plan
+    tools = {tool.name: tool for tool in router.list_tools()}
+    for step in plan.steps:
+        if step.tool and step.tool in tools and tools[step.tool].destructive:
+            step.requires_approval = True
+    return plan
 
 
 def _approve_map(approvals: dict[str, AgentApproval] | None) -> dict[str, Approval]:
@@ -312,13 +513,21 @@ def _compute_status(plan: Plan) -> AgentRunStatus:
 
 
 def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
-    policy = AgentPolicy()
+    project = store.get_project(project_id)
+    allowed_paths = [project.workspace_path] if project else []
+    policy = AgentPolicy(allowed_paths=allowed_paths)
     router = ToolRouter(policy)
     router.register(_tool_run_factory(project_id))
     router.register(_tool_preview_factory(project_id))
     router.register(_tool_list_datasets_factory(project_id))
     router.register(_tool_list_project_runs_factory(project_id))
     router.register(_tool_list_artifacts_factory(project_id))
+    router.register(_tool_list_project_sqlite_factory(project_id, policy))
+    router.register(_tool_list_db_tables_factory(project_id, policy))
+    router.register(_tool_query_db_factory(project_id, policy))
+    router.register(_tool_write_file_factory(project_id, policy))
+    router.register(_tool_write_markdown_factory(project_id, policy))
+    router.register(_tool_run_python_factory(project_id, policy))
     router.register(_tool_create_snapshot_factory(project_id))
     router.register(_tool_request_rollback_factory(project_id))
     return router, policy
@@ -911,9 +1120,28 @@ def send_chat_message(
 ) -> tuple[AgentChatMessage, AgentChatMessage, AgentRunRead | None]:
     user_message = create_chat_message(project_id, "user", content)
     router, _ = _build_router(project_id)
-    plan = _chat_prompt_to_plan(content, dataset_id, router, safe_mode)
+    plan_payload = generate_plan(
+        prompt=content,
+        tool_catalog=_tool_catalog(router),
+        dataset_id=dataset_id,
+        safe_mode=safe_mode,
+    )
+    plan = AgentPlanCreate(
+        objective=plan_payload.objective,
+        steps=[
+            AgentPlanStepCreate(
+                title=step.title,
+                description=step.description,
+                tool=step.tool,
+                args=step.args,
+                requires_approval=step.requires_approval,
+            )
+            for step in plan_payload.steps
+        ],
+    )
+    plan = _apply_safe_mode(plan, router, safe_mode)
     run: AgentRunRead | None = None
-    assistant_content = "Saved your note. Try: list datasets, preview dataset, or run profile."
+    assistant_content = "Saved your note."
 
     if plan.steps:
         if auto_run:
