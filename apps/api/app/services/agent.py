@@ -528,6 +528,10 @@ def _tool_run_shell_factory(project_id: str, policy: AgentPolicy):
         command = str(args.get("command", "")).strip()
         if not command:
             raise ValueError("Command is required")
+        if not policy.allow_network:
+            blocked_tokens = ("http://", "https://", "curl ", "wget ")
+            if any(token in command for token in blocked_tokens):
+                raise PermissionError("Network access is disabled by policy")
         if policy.allowed_shell_commands:
             allowed = tuple(policy.allowed_shell_commands)
             if not command.startswith(allowed):
@@ -541,6 +545,10 @@ def _tool_run_shell_factory(project_id: str, policy: AgentPolicy):
                 raise ValueError("Project not found")
             cwd = validate_path(str(project.workspace_path), policy)
         timeout = int(args.get("timeout", policy.max_shell_seconds))
+        if bool(args.get("dry_run", False)):
+            return ToolResult(
+                output={"command": command, "cwd": str(cwd), "dry_run": True}
+            )
         result = subprocess.run(
             command,
             cwd=str(cwd),
@@ -699,7 +707,12 @@ def _tool_catalog(router: ToolRouter) -> list[dict[str, Any]]:
         "append_file": {"path": "string", "content": "string"},
         "write_markdown": {"path": "string", "content": "string"},
         "run_python": {"code": "string (optional)", "path": "string (optional)"},
-        "run_shell": {"command": "string", "cwd": "string (optional)", "timeout": "int"},
+        "run_shell": {
+            "command": "string",
+            "cwd": "string (optional)",
+            "timeout": "int",
+            "dry_run": "bool",
+        },
         "create_run": {"dataset_id": "string", "type": "ingest|profile|analysis|report"},
         "create_snapshot": {"kind": "string", "path": "string", "run_id": "string (optional)"},
         "request_rollback": {"run_id": "string (optional)", "snapshot_id": "string (optional)"},
@@ -850,6 +863,26 @@ def _write_run_artifacts(project_id: str, run_id: str, plan: dict[str, Any], log
     )
 
 
+def _truncate_text(value: str | None, limit: int = 500) -> str | None:
+    if value is None:
+        return None
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "..."
+
+
+def _compact_output(output: dict[str, Any] | None, limit: int = 500) -> dict[str, Any]:
+    if not output:
+        return {}
+    compact: dict[str, Any] = {}
+    for key, value in output.items():
+        if isinstance(value, str):
+            compact[key] = _truncate_text(value, limit)
+        elif isinstance(value, (int, float, bool)):
+            compact[key] = value
+    return compact
+
+
 def _summarize_run_log(log: list[dict[str, Any]], max_items: int = 6) -> list[dict[str, Any]]:
     summary: list[dict[str, Any]] = []
     for entry in log[-max_items:]:
@@ -859,9 +892,10 @@ def _summarize_run_log(log: list[dict[str, Any]], max_items: int = 6) -> list[di
                 "tool": entry.get("tool"),
                 "status": entry.get("status"),
                 "error": entry.get("error"),
-                "stdout": output.get("stdout"),
-                "stderr": output.get("stderr"),
+                "stdout": _truncate_text(output.get("stdout")),
+                "stderr": _truncate_text(output.get("stderr")),
                 "path": output.get("path"),
+                "output": _compact_output(output),
             }
         )
     return summary
