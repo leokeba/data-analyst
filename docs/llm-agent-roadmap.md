@@ -23,7 +23,7 @@
 	- ✅ Skills UI: edit name/description/toolchain
 	- ✅ Skill toolchain validation against registered tools
 	- ✅ Persisted run logs wired to UI (expandable log viewer)
-	- ⏳ Tool approval UI + apply/rollback controls (not started)
+	- ✅ Tool approval UI: per-step approval prompts (basic)
 	- ⏳ Snapshot/rollback implementation beyond metadata (not started)
 
 ## Goals
