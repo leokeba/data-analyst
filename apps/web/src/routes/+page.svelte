@@ -695,6 +695,39 @@
 		}
 	}
 
+	async function runAgentSkill(skill: AgentSkill) {
+		if (!selectedProjectId) return;
+		if (!confirm(`Run skill "${skill.name}"?`)) return;
+		agentSkillsActionError = '';
+		try {
+			const planResp = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/skills/${skill.id}/plan`
+			);
+			if (!planResp.ok) throw new Error('Failed to load skill plan');
+			const plan = await planResp.json();
+			const approvedBy = prompt('Approved by', 'ui');
+			if (!approvedBy) return;
+			const approvals: Record<string, { approved_by: string; note?: string }> = {};
+			for (const step of plan.steps ?? []) {
+				if (step.requires_approval && step.id) {
+					approvals[step.id] = { approved_by: approvedBy, note: 'skill run' };
+				}
+			}
+			const runResp = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/runs`,
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ plan, approvals })
+				}
+			);
+			if (!runResp.ok) throw new Error('Failed to run skill');
+			await loadAgentRuns();
+		} catch (e) {
+			agentSkillsActionError = (e as Error).message;
+		}
+	}
+
 	function nextAgentRollbacksPage() {
 		if (!agentRollbacksHasNext) return;
 		agentRollbacksOffset += agentRollbacksLimit;
@@ -1180,6 +1213,7 @@
 				onCreate={createAgentSkill}
 				onToggle={toggleAgentSkill}
 				onDelete={deleteAgentSkill}
+				onRun={runAgentSkill}
 			/>
 		{:else}
 			<div class="welcome">

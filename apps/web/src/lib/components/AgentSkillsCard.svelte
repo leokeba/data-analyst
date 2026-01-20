@@ -1,4 +1,3 @@
-<!-- filepath: /Users/leo/Dev/data-analyst/apps/web/src/lib/components/AgentSkillsCard.svelte -->
 <script lang="ts">
 	type AgentSkill = {
 		id: string;
@@ -22,6 +21,7 @@
 	export let isCreating = false;
 	export let onCreate: () => void;
 	export let onToggle: (skill: AgentSkill) => void;
+	export let onRun: (skill: AgentSkill) => void;
 	export let onDelete: (skill: AgentSkill) => void;
 </script>
 
@@ -64,6 +64,9 @@
 						<span>Toolchain: {skill.toolchain.join(", ")}</span>
 					{/if}
 					<span>Enabled: {skill.enabled ? "Yes" : "No"}</span>
+						<button class="secondary" on:click={() => onRun(skill)}>
+							Run
+						</button>
 					<div class="card__actions">
 						<button class="secondary" on:click={() => onToggle(skill)}>
 							{skill.enabled ? "Disable" : "Enable"}
