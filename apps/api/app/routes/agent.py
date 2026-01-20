@@ -106,3 +106,39 @@ def list_agent_rollbacks(
         )
         for rollback in rollbacks
     ]
+
+
+@router.post("/rollbacks/{rollback_id}/apply", response_model=AgentRollbackRead)
+def apply_agent_rollback(project_id: str, rollback_id: str) -> AgentRollbackRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    rollback = agent_service.set_rollback_status(project_id, rollback_id, "applied")
+    if not rollback:
+        raise HTTPException(status_code=404, detail="Rollback not found")
+    return AgentRollbackRead(
+        id=rollback.id,
+        project_id=rollback.project_id,
+        run_id=rollback.run_id,
+        snapshot_id=rollback.snapshot_id,
+        status=rollback.status,
+        created_at=rollback.created_at,
+        note=rollback.note,
+    )
+
+
+@router.post("/rollbacks/{rollback_id}/cancel", response_model=AgentRollbackRead)
+def cancel_agent_rollback(project_id: str, rollback_id: str) -> AgentRollbackRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    rollback = agent_service.set_rollback_status(project_id, rollback_id, "cancelled")
+    if not rollback:
+        raise HTTPException(status_code=404, detail="Rollback not found")
+    return AgentRollbackRead(
+        id=rollback.id,
+        project_id=rollback.project_id,
+        run_id=rollback.run_id,
+        snapshot_id=rollback.snapshot_id,
+        status=rollback.status,
+        created_at=rollback.created_at,
+        note=rollback.note,
+    )

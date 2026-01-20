@@ -394,3 +394,23 @@ def count_rollbacks(project_id: str) -> int:
             select(func.count()).select_from(AgentRollback).where(AgentRollback.project_id == project_id)
         ).one()
     return int(total)
+
+
+def get_rollback(project_id: str, rollback_id: str) -> AgentRollback | None:
+    with get_session() as session:
+        rollback = session.get(AgentRollback, rollback_id)
+    if not rollback or rollback.project_id != project_id:
+        return None
+    return rollback
+
+
+def set_rollback_status(project_id: str, rollback_id: str, status: str) -> AgentRollback | None:
+    with get_session() as session:
+        rollback = session.get(AgentRollback, rollback_id)
+        if not rollback or rollback.project_id != project_id:
+            return None
+        rollback.status = status
+        session.add(rollback)
+        session.commit()
+        session.refresh(rollback)
+        return rollback

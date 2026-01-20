@@ -13,6 +13,7 @@
 	- ✅ Rollback request endpoint (record-only)
 	- ✅ Rollback request action wired in UI (record-only)
 	- ✅ Rollback request list surfaced in agent UI
+	- ✅ Apply/cancel controls for rollback requests (record-only)
 	- ✅ Persisted run logs wired to UI (expandable log viewer)
 	- ⏳ Tool approval UI + apply/rollback controls (not started)
 	- ⏳ Snapshot/rollback implementation beyond metadata (not started)

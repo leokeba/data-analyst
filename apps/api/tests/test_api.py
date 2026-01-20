@@ -157,6 +157,12 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
         json={"note": "test rollback"},
     )
     assert rollback_resp.status_code == 201
+    rollback_id = rollback_resp.json()["id"]
+
+    apply_resp = client.post(
+        f"/projects/{project_id}/agent/rollbacks/{rollback_id}/apply",
+    )
+    assert apply_resp.status_code == 200
 
     rollbacks_resp = client.get(f"/projects/{project_id}/agent/rollbacks")
     assert rollbacks_resp.status_code == 200

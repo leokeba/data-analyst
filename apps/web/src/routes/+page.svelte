@@ -625,6 +625,38 @@
 		}
 	}
 
+	async function applyAgentRollback(rollback: AgentRollback) {
+		if (!selectedProjectId) return;
+		if (!confirm('Mark this rollback as applied?')) return;
+		agentRollbackError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/rollbacks/${rollback.id}/apply`,
+				{ method: 'POST' }
+			);
+			if (!res.ok) throw new Error('Failed to apply rollback');
+			await loadAgentRollbacks();
+		} catch (e) {
+			agentRollbackError = (e as Error).message;
+		}
+	}
+
+	async function cancelAgentRollback(rollback: AgentRollback) {
+		if (!selectedProjectId) return;
+		if (!confirm('Cancel this rollback request?')) return;
+		agentRollbackError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/rollbacks/${rollback.id}/cancel`,
+				{ method: 'POST' }
+			);
+			if (!res.ok) throw new Error('Failed to cancel rollback');
+			await loadAgentRollbacks();
+		} catch (e) {
+			agentRollbackError = (e as Error).message;
+		}
+	}
+
 	async function replayAgentRun(run: AgentRun) {
 		if (!selectedProjectId) return;
 		if (!confirm('Replay this agent plan?')) return;
@@ -1025,6 +1057,8 @@
 				onRequestRollback={requestAgentRollback}
 				onPrevRollbacksPage={prevAgentRollbacksPage}
 				onNextRollbacksPage={nextAgentRollbacksPage}
+				onApplyRollback={applyAgentRollback}
+				onCancelRollback={cancelAgentRollback}
 			/>
 		{:else}
 			<div class="welcome">

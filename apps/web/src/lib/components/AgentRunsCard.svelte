@@ -96,6 +96,8 @@
 	export let onRequestRollback: (snapshot: AgentSnapshot) => void;
 	export let onPrevRollbacksPage: () => void;
 	export let onNextRollbacksPage: () => void;
+	export let onApplyRollback: (rollback: AgentRollback) => void;
+	export let onCancelRollback: (rollback: AgentRollback) => void;
 
 	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
 	$: rangeStart = runs.length ? pageOffset + 1 : 0;
@@ -302,6 +304,16 @@
 					{/if}
 					{#if rollback.note}
 						<span>Note: {rollback.note}</span>
+					{/if}
+					{#if rollback.status === "requested"}
+						<div class="card__actions">
+							<button class="secondary" on:click={() => onApplyRollback(rollback)}>
+								Mark applied
+							</button>
+							<button class="secondary" on:click={() => onCancelRollback(rollback)}>
+								Cancel
+							</button>
+						</div>
 					{/if}
 				</li>
 			{/each}
