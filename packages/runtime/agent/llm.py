@@ -50,6 +50,9 @@ def generate_plan(
         "You are the Planner. Produce a JSON plan with objective and steps. "
         "Use only tools from the catalog. Keep steps minimal and deterministic. "
         "If context is provided, incorporate tool outputs and failures to refine the next plan. "
+        "When analyzing data, do not assume schemas or types. "
+        "Prefer listing datasets and previewing or reading sample rows before writing analysis code. "
+        "Handle non-numeric fields defensively and avoid casting without checks. "
         "Return JSON only with keys: objective, steps[].title, steps[].description, "
         "steps[].tool, steps[].args, steps[].requires_approval."
     )
