@@ -10,7 +10,6 @@ dependencies = [
     "openai>=2.15.0",
     "pandas>=2.3.3",
     "pydantic>=2.12.5",
-    "pydantic-ai>=1.44.0",
     "python-dotenv>=1.2.1",
     "python-multipart>=0.0.21",
     "sqlmodel>=0.0.31",
