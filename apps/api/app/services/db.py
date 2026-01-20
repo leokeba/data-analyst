@@ -4,7 +4,7 @@ from pathlib import Path
 
 from sqlmodel import SQLModel, Session, create_engine
 
-from app.models.db import Project, Dataset, Run, Artifact
+from app.models.db import Project, Dataset, Run, Artifact, AgentRun
 
 
 def _db_path() -> Path:

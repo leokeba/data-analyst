@@ -10,7 +10,8 @@ This document defines development guidelines for the data‑analyst framework.
 - Keep the agent layer thin and optional.
 
 ## Python tooling (uv)
-We use `uv` for all Python development workflows.
+We use `uv` for all Python development workflows. This is mandatory for installs, running scripts, and tests.
+Do not use `pip`, `python -m pip`, or `python` directly for project tasks; always use `uv`.
 
 ### Dependency management
 - Add dependencies: `uv add <package>`

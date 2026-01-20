@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import Literal
 from pydantic import BaseModel, Field
 
@@ -56,3 +57,53 @@ class ArtifactRead(BaseModel):
     path: str
     mime_type: str
     size: int
+
+
+class AgentPlanStepCreate(BaseModel):
+    id: str | None = None
+    title: str
+    description: str
+    tool: str | None = None
+    args: dict | None = None
+    requires_approval: bool = True
+
+
+class AgentPlanCreate(BaseModel):
+    objective: str
+    steps: list[AgentPlanStepCreate]
+
+
+class AgentApproval(BaseModel):
+    approved_by: str
+    note: str | None = None
+
+
+class AgentRunStatus(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AgentRunCreate(BaseModel):
+    plan: AgentPlanCreate
+    approvals: dict[str, AgentApproval] | None = None
+
+
+class AgentRunRead(BaseModel):
+    id: str
+    project_id: str
+    status: AgentRunStatus
+    plan: AgentPlanCreate
+    log: list[dict[str, object]]
+
+
+class AgentToolRead(BaseModel):
+    name: str
+    description: str
+    destructive: bool
+
+
+class AgentToolRead(BaseModel):
+    name: str
+    description: str
+    destructive: bool

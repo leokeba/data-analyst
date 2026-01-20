@@ -46,3 +46,12 @@ class Artifact(SQLModel, table=True):
     path: str
     mime_type: str
     size: int
+
+
+class AgentRun(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    project_id: str = Field(index=True)
+    status: str
+    created_at: datetime = Field(default_factory=_now)
+    plan: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    log: Optional[list[dict]] = Field(default=None, sa_column=Column(JSON))

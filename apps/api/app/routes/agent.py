@@ -1,0 +1,41 @@
+from fastapi import APIRouter, HTTPException, Response
+
+from app.models.schemas import AgentRunCreate, AgentRunRead, AgentToolRead
+from app.services import agent as agent_service
+from app.services import store
+
+router = APIRouter()
+
+
+@router.post("/runs", response_model=AgentRunRead, status_code=201)
+def create_agent_run(project_id: str, payload: AgentRunCreate) -> AgentRunRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return agent_service.run_plan(project_id, payload.plan, payload.approvals)
+
+
+@router.get("/runs", response_model=list[AgentRunRead])
+def list_agent_runs(
+    project_id: str, response: Response, limit: int = 100, offset: int = 0
+) -> list[AgentRunRead]:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(agent_service.count_runs(project_id))
+    return agent_service.list_runs(project_id, limit=limit, offset=offset)
+
+
+@router.get("/runs/{run_id}", response_model=AgentRunRead)
+def get_agent_run(project_id: str, run_id: str) -> AgentRunRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    run = agent_service.get_run(project_id, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    return run
+
+
+@router.get("/tools", response_model=list[AgentToolRead])
+def list_agent_tools(project_id: str) -> list[AgentToolRead]:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return agent_service.list_tools(project_id)

@@ -89,3 +89,59 @@ def test_project_dataset_run_flow(client, tmp_path: Path):
 
     delete_project_resp = client.delete(f"/projects/{project_id}")
     assert delete_project_resp.status_code == 204
+
+
+def test_agent_run_executes_plan(client, tmp_path: Path):
+    project = client.post("/projects", json={"name": "Agent Project"}).json()
+    project_id = project["id"]
+
+    source_path = tmp_path / "agent.csv"
+    source_path.write_text("a,b\n1,2\n3,4\n")
+
+    dataset_resp = client.post(
+        f"/projects/{project_id}/datasets",
+        json={"name": "agent.csv", "source": str(source_path)},
+    )
+    assert dataset_resp.status_code == 201
+    dataset = dataset_resp.json()
+
+    tools_resp = client.get(f"/projects/{project_id}/agent/tools")
+    assert tools_resp.status_code == 200
+    tool_names = {tool["name"] for tool in tools_resp.json()}
+    assert "create_run" in tool_names
+    assert "list_datasets" in tool_names
+    assert "list_project_runs" in tool_names
+
+    plan_payload = {
+        "objective": "Profile dataset",
+        "steps": [
+            {
+                "id": "step-profile",
+                "title": "Run profile",
+                "description": "Create a profiling run",
+                "tool": "create_run",
+                "args": {"dataset_id": dataset["id"], "type": "profile"},
+                "requires_approval": True,
+            }
+        ],
+    }
+    run_payload = {
+        "plan": plan_payload,
+        "approvals": {"step-profile": {"approved_by": "tester"}},
+    }
+    agent_run_resp = client.post(
+        f"/projects/{project_id}/agent/runs",
+        json=run_payload,
+    )
+    assert agent_run_resp.status_code == 201
+    agent_run = agent_run_resp.json()
+    assert agent_run["status"] == "completed"
+    assert agent_run["log"][0]["status"] == "applied"
+
+    run_id = agent_run["id"]
+    agent_run_get = client.get(f"/projects/{project_id}/agent/runs/{run_id}")
+    assert agent_run_get.status_code == 200
+
+    list_runs_resp = client.get(f"/projects/{project_id}/agent/runs")
+    assert list_runs_resp.status_code == 200
+    assert list_runs_resp.headers.get("x-total-count")
