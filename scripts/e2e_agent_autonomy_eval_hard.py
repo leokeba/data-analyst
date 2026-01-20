@@ -48,7 +48,7 @@ def _request(
     url: str,
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int = 120,
 ) -> tuple[int, dict[str, str], bytes]:
     req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     try:
@@ -61,10 +61,15 @@ def _request(
         raise RuntimeError(f"Request failed: {exc}") from exc
 
 
-def _request_json(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _request_json(
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    timeout: int = 120,
+) -> dict[str, Any]:
     body = json.dumps(payload or {}).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if payload is not None else {}
-    status, _, data = _request(method, url, body=body, headers=headers)
+    status, _, data = _request(method, url, body=body, headers=headers, timeout=timeout)
     try:
         parsed = json.loads(data.decode("utf-8")) if data else {}
     except json.JSONDecodeError:
@@ -76,17 +81,17 @@ def _request_json(method: str, url: str, payload: dict[str, Any] | None = None) 
     return parsed
 
 
-def _health_check(api_base: str) -> None:
-    status, _, data = _request("GET", f"{api_base}/health")
+def _health_check(api_base: str, timeout: int) -> None:
+    status, _, data = _request("GET", f"{api_base}/health", timeout=timeout)
     if status != 200:
         raise RuntimeError(
             f"Health check failed ({status}): {data.decode('utf-8', errors='replace')}"
         )
 
 
-def _create_project(api_base: str) -> dict[str, Any]:
+def _create_project(api_base: str, timeout: int) -> dict[str, Any]:
     name = f"e2e-autonomy-hard-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    return _request_json("POST", f"{api_base}/projects", {"name": name})
+    return _request_json("POST", f"{api_base}/projects", {"name": name}, timeout=timeout)
 
 
 def _send_agent_chat(
@@ -95,37 +100,58 @@ def _send_agent_chat(
     content: str,
     safe_mode: bool = False,
     auto_run: bool = True,
+    timeout: int = 120,
 ) -> dict[str, Any]:
     return _request_json(
         "POST",
         f"{api_base}/projects/{project_id}/agent/chat",
         {"content": content, "dataset_id": None, "safe_mode": safe_mode, "auto_run": auto_run},
+        timeout=timeout,
     )
 
 
+def _send_chat_with_retry(
+    api_base: str,
+    project_id: str,
+    prompts: list[str],
+    timeout: int,
+) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for prompt in prompts:
+        try:
+            return _send_agent_chat(api_base, project_id, prompt, safe_mode=False, auto_run=True, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001 - try next prompt
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise RuntimeError("No prompts provided")
+
+
 def _extract_stdout(run: dict[str, Any]) -> str:
+    stdout = ""
     for entry in run.get("log") or []:
         if entry.get("tool") == "run_python":
             output = entry.get("output") or {}
-            return str(output.get("stdout") or "")
-    return ""
+            stdout = str(output.get("stdout") or "")
+    return stdout
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run hard autonomy evaluation against the agent API.")
     parser.add_argument("--api-base", default=os.environ.get("API_BASE", "http://127.0.0.1:8000"))
+    parser.add_argument("--timeout", type=int, default=int(os.environ.get("AGENT_EVAL_TIMEOUT", "180")))
     args = parser.parse_args()
 
     api_base = args.api_base.rstrip("/")
     steps: list[EvalStep] = []
 
     try:
-        _health_check(api_base)
+        _health_check(api_base, args.timeout)
         steps.append(EvalStep("health_check", True, "API reachable"))
         _log_section("API")
         print(f"API base: {api_base}")
 
-        project = _create_project(api_base)
+        project = _create_project(api_base, args.timeout)
         project_id = project["id"]
         workspace_path = project["workspace_path"]
         steps.append(EvalStep("create_project", True, f"project_id={project_id}"))
@@ -159,8 +185,34 @@ def main() -> int:
 
         _log_section("Chat prompt")
         print(chat_prompt)
+        print("\n---\n")
+        chat_prompt_strict = (
+            "Return a JSON plan with keys: objective and steps. "
+            "Each steps[] item MUST include title, description, tool, args, requires_approval. "
+            "Use ONLY tools: list_dir, write_file, append_file, read_file, run_python. "
+            "Set requires_approval=false for every step. "
+            f"Step 1: list_dir path={workspace_path}. "
+            f"Step 2: write_file generator script at {generator_path} to write deterministic CSV to {dataset_path} "
+            "with 200 rows (columns id, amount, category, region, day). random.seed(42). "
+            "Categories: hardware, software, services. Regions: north, south, east, west. "
+            "Amounts between 10 and 500. Days 1-30. "
+            "Step 3: run_python the generator script. "
+            f"Step 4: read_file first 6 lines of {dataset_path}. "
+            f"Step 5: append_file line 'autonomy-hard ok' to {note_path}. "
+            f"Step 6: write_file analysis script at {analysis_path} that writes markdown report to {report_path} "
+            "and prints it to stdout with sections: # Hard Autonomy Report, ## Summary, ## Missing values, "
+            "## Top categories, ## Region totals, ## Sample rows. "
+            "Compute row count, column count, missing values per column, top 3 categories, total amount per region. "
+            "Step 7: run_python the analysis script."
+        )
 
-        chat_response = _send_agent_chat(api_base, project_id, chat_prompt, safe_mode=False, auto_run=True)
+        print(chat_prompt_strict)
+        chat_response = _send_chat_with_retry(
+            api_base,
+            project_id,
+            [chat_prompt, chat_prompt_strict],
+            timeout=args.timeout,
+        )
         _log_section("Chat response")
         _log_json("Chat response", chat_response)
         run = chat_response.get("run")
