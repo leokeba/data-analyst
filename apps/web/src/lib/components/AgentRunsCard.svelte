@@ -1,4 +1,3 @@
-<!-- filepath: /Users/leo/Dev/data-analyst/apps/web/src/lib/components/AgentRunsCard.svelte -->
 <script lang="ts">
 	type AgentTool = {
 		name: string;
@@ -10,9 +9,9 @@
 		id: string;
 		status: string;
 		plan: {
-			objective: string;
 			steps: { id?: string; title: string; tool?: string | null }[];
-		};
+			steps: { id?: string; title: string; tool?: string | null }[];
+		log: Record<string, unknown>[];
 		log: Record<string, unknown>[];
 	};
 
@@ -28,6 +27,12 @@
 	export let totalCount: number | null = null;
 	export let onPrevPage: () => void;
 	export let onNextPage: () => void;
+
+	function stepStatus(run: AgentRun, stepId?: string) {
+		if (!stepId) return "pending";
+		const entry = run.log.find((item) => item.step_id === stepId);
+		return (entry?.status as string) ?? "pending";
+	}
 	export let onRefresh: () => void;
 
 	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
@@ -88,6 +93,20 @@
 					<span>Status: {run.status}</span>
 					<span>Steps: {run.plan.steps.length}</span>
 					<span>Run id: {run.id}</span>
+					{#if run.plan.steps.length}
+						<div class="summary">
+							<strong>Steps</strong>
+							<ul>
+								{#each run.plan.steps as step}
+									<li>
+										<strong>{step.title}</strong>
+										<span>Tool: {step.tool ?? "—"}</span>
+										<span>Status: {stepStatus(run, step.id)}</span>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
 				</li>
 			{/each}
 		</ul>
