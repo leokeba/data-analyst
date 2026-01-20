@@ -55,3 +55,13 @@ class AgentRun(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
     plan: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     log: Optional[list[dict]] = Field(default=None, sa_column=Column(JSON))
+
+
+class AgentSnapshot(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    project_id: str = Field(index=True)
+    run_id: Optional[str] = Field(default=None, index=True)
+    kind: str
+    target_path: str
+    created_at: datetime = Field(default_factory=_now)
+    details: Optional[dict] = Field(default=None, sa_column=Column(JSON))

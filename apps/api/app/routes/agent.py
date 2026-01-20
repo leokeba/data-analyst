@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Response
 
-from app.models.schemas import AgentRunCreate, AgentRunRead, AgentToolRead
+from app.models.schemas import AgentRunCreate, AgentRunRead, AgentSnapshotRead, AgentToolRead
 from app.services import agent as agent_service
 from app.services import store
 
@@ -39,3 +39,25 @@ def list_agent_tools(project_id: str) -> list[AgentToolRead]:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     return agent_service.list_tools(project_id)
+
+
+@router.get("/snapshots", response_model=list[AgentSnapshotRead])
+def list_agent_snapshots(
+    project_id: str, response: Response, limit: int = 100, offset: int = 0
+) -> list[AgentSnapshotRead]:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(agent_service.count_snapshots(project_id))
+    snapshots = agent_service.list_snapshots(project_id, limit=limit, offset=offset)
+    return [
+        AgentSnapshotRead(
+            id=snapshot.id,
+            project_id=snapshot.project_id,
+            run_id=snapshot.run_id,
+            kind=snapshot.kind,
+            target_path=snapshot.target_path,
+            created_at=snapshot.created_at,
+            details=snapshot.details,
+        )
+        for snapshot in snapshots
+    ]

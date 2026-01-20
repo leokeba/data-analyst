@@ -112,6 +112,7 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     assert "list_datasets" in tool_names
     assert "list_project_runs" in tool_names
     assert "list_artifacts" in tool_names
+    assert "create_snapshot" in tool_names
 
     plan_payload = {
         "objective": "Profile dataset",
@@ -146,3 +147,6 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     list_runs_resp = client.get(f"/projects/{project_id}/agent/runs")
     assert list_runs_resp.status_code == 200
     assert list_runs_resp.headers.get("x-total-count")
+
+    snapshots_resp = client.get(f"/projects/{project_id}/agent/snapshots")
+    assert snapshots_resp.status_code == 200

@@ -103,6 +103,16 @@ class AgentToolRead(BaseModel):
     destructive: bool
 
 
+class AgentSnapshotRead(BaseModel):
+    id: str
+    project_id: str
+    run_id: str | None = None
+    kind: str
+    target_path: str
+    created_at: datetime
+    details: dict | None = None
+
+
 class AgentToolRead(BaseModel):
     name: str
     description: str

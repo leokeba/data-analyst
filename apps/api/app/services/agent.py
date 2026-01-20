@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from app.models.db import AgentRun
+from app.models.db import AgentRun, AgentSnapshot
 from sqlalchemy import func
 from sqlmodel import select
 from app.models.schemas import (
@@ -111,6 +111,47 @@ def _tool_list_artifacts_factory(project_id: str):
     )
 
 
+def _tool_create_snapshot_factory(project_id: str):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        kind = str(args.get("kind", ""))
+        target_path = str(args.get("path", ""))
+        run_id = args.get("run_id")
+        details = args.get("metadata") if isinstance(args.get("metadata"), dict) else None
+        if not kind or not target_path:
+            raise ValueError("Snapshot requires kind and path")
+        snapshot = AgentSnapshot(
+            project_id=project_id,
+            run_id=run_id,
+            kind=kind,
+            target_path=target_path,
+            details=details,
+        )
+        with get_session() as session:
+            session.add(snapshot)
+            session.commit()
+            session.refresh(snapshot)
+        return ToolResult(
+            output={
+                "snapshot": {
+                    "id": snapshot.id,
+                    "project_id": snapshot.project_id,
+                    "run_id": snapshot.run_id,
+                    "kind": snapshot.kind,
+                    "target_path": snapshot.target_path,
+                    "created_at": snapshot.created_at.isoformat(),
+                    "details": snapshot.details,
+                }
+            }
+        )
+
+    return ToolDefinition(
+        name="create_snapshot",
+        description="Create a snapshot record for a workspace path.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
 def _build_plan(payload: AgentPlanCreate) -> Plan:
     steps: list[PlanStep] = []
     for step in payload.steps:
@@ -167,6 +208,7 @@ def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
     router.register(_tool_list_datasets_factory(project_id))
     router.register(_tool_list_project_runs_factory(project_id))
     router.register(_tool_list_artifacts_factory(project_id))
+    router.register(_tool_create_snapshot_factory(project_id))
     return router, policy
 
 
@@ -256,5 +298,25 @@ def count_runs(project_id: str) -> int:
     with get_session() as session:
         total = session.exec(
             select(func.count()).select_from(AgentRun).where(AgentRun.project_id == project_id)
+        ).one()
+    return int(total)
+
+
+def list_snapshots(project_id: str, limit: int = 100, offset: int = 0) -> list[AgentSnapshot]:
+    with get_session() as session:
+        snapshots = session.exec(
+            select(AgentSnapshot)
+            .where(AgentSnapshot.project_id == project_id)
+            .order_by(AgentSnapshot.created_at)
+            .offset(offset)
+            .limit(limit)
+        ).all()
+    return snapshots
+
+
+def count_snapshots(project_id: str) -> int:
+    with get_session() as session:
+        total = session.exec(
+            select(func.count()).select_from(AgentSnapshot).where(AgentSnapshot.project_id == project_id)
         ).one()
     return int(total)
