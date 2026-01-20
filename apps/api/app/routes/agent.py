@@ -10,6 +10,8 @@ from app.models.schemas import (
     AgentRunRead,
     AgentSnapshotRead,
     AgentToolRead,
+    AgentPlanCreate,
+    AgentPlanStepCreate,
 )
 from app.services import agent as agent_service
 from app.services import store
@@ -214,6 +216,27 @@ def get_agent_skill(project_id: str, skill_id: str) -> AgentSkillRead:
         created_at=skill.created_at,
         updated_at=skill.updated_at,
     )
+
+
+@router.get("/skills/{skill_id}/plan", response_model=AgentPlanCreate)
+def get_agent_skill_plan(project_id: str, skill_id: str) -> AgentPlanCreate:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    skill = agent_service.get_skill(project_id, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    steps = []
+    for tool in skill.toolchain or []:
+        steps.append(
+            AgentPlanStepCreate(
+                title=f"Run {tool}",
+                description=skill.description,
+                tool=tool,
+                args={},
+                requires_approval=True,
+            )
+        )
+    return AgentPlanCreate(objective=skill.name, steps=steps)
 
 
 @router.patch("/skills/{skill_id}", response_model=AgentSkillRead)

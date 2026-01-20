@@ -190,5 +190,10 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     )
     assert update_skill_resp.status_code == 200
 
+    skill_plan_resp = client.get(
+        f"/projects/{project_id}/agent/skills/{skill_id}/plan",
+    )
+    assert skill_plan_resp.status_code == 200
+
     delete_skill_resp = client.delete(f"/projects/{project_id}/agent/skills/{skill_id}")
     assert delete_skill_resp.status_code == 204

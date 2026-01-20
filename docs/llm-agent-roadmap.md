@@ -16,6 +16,7 @@
 	- ✅ Apply/cancel controls for rollback requests (record-only)
 	- ✅ Skills registry CRUD endpoints (Phase 3 groundwork)
 	- ✅ Skills UI: list/create/toggle/delete (basic)
+	- ✅ Skill → plan skeleton endpoint (toolchain to plan steps)
 	- ✅ Persisted run logs wired to UI (expandable log viewer)
 	- ⏳ Tool approval UI + apply/rollback controls (not started)
 	- ⏳ Snapshot/rollback implementation beyond metadata (not started)
