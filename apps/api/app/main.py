@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
 
+from dotenv import load_dotenv
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
+
+load_dotenv(dotenv_path=ROOT / ".env")
 
 from app.routes.agent import router as agent_router
 from app.routes.artifacts import router as artifacts_router
