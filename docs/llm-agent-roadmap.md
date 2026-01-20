@@ -9,6 +9,7 @@
 	- ✅ Replay flow captures approver name for required-approval steps
 	- ✅ Snapshot listing endpoint (metadata only)
 	- ✅ Snapshot records persisted in DB schema
+	- ✅ Snapshot list surfaced in agent UI (read-only)
 	- ⏳ Persisted run logs wired to UI (not started)
 	- ⏳ Tool approval UI + apply/rollback controls (not started)
 	- ⏳ Snapshot/rollback implementation beyond metadata (not started)

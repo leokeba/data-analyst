@@ -64,6 +64,16 @@
 		log: Record<string, unknown>[];
 	};
 
+	type AgentSnapshot = {
+		id: string;
+		project_id: string;
+		run_id?: string | null;
+		kind: string;
+		target_path: string;
+		created_at: string;
+		details?: Record<string, unknown> | null;
+	};
+
 	// State - Projects
 	let projects: Project[] = [];
 	let loading = true;
@@ -156,6 +166,13 @@
 	let agentRunsOffset = 0;
 	let agentRunsHasNext = false;
 	let agentRunsTotal: number | null = null;
+	let agentSnapshots: AgentSnapshot[] = [];
+	let agentSnapshotsLoading = false;
+	let agentSnapshotsError = '';
+	let agentSnapshotsLimit = 10;
+	let agentSnapshotsOffset = 0;
+	let agentSnapshotsHasNext = false;
+	let agentSnapshotsTotal: number | null = null;
 
 	// Derived
 	$: if (selectedDatasetId && datasets.length) {
@@ -293,7 +310,14 @@
 		runsOffset = 0;
 		artifactsOffset = 0;
 		agentRunsOffset = 0;
-		await Promise.all([loadDatasets(), loadRuns(), loadAgentTools(), loadAgentRuns()]);
+		agentSnapshotsOffset = 0;
+		await Promise.all([
+			loadDatasets(),
+			loadRuns(),
+			loadAgentTools(),
+			loadAgentRuns(),
+			loadAgentSnapshots()
+		]);
 	}
 
 	// Datasets
@@ -488,6 +512,40 @@
 		} finally {
 			agentRunsLoading = false;
 		}
+	}
+
+	async function loadAgentSnapshots() {
+		if (!selectedProjectId) return;
+		agentSnapshotsLoading = true;
+		agentSnapshotsError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/snapshots?limit=${agentSnapshotsLimit}&offset=${agentSnapshotsOffset}`
+			);
+			if (!res.ok) throw new Error('Failed to fetch snapshots');
+			agentSnapshots = await res.json();
+			const totalHeader = res.headers.get('x-total-count');
+			agentSnapshotsTotal = totalHeader ? Number(totalHeader) : null;
+			agentSnapshotsHasNext = agentSnapshotsTotal !== null
+				? agentSnapshotsOffset + agentSnapshotsLimit < agentSnapshotsTotal
+				: agentSnapshots.length === agentSnapshotsLimit;
+		} catch (e) {
+			agentSnapshotsError = (e as Error).message;
+		} finally {
+			agentSnapshotsLoading = false;
+		}
+	}
+
+	function nextAgentSnapshotsPage() {
+		if (!agentSnapshotsHasNext) return;
+		agentSnapshotsOffset += agentSnapshotsLimit;
+		loadAgentSnapshots();
+	}
+
+	function prevAgentSnapshotsPage() {
+		if (agentSnapshotsOffset === 0) return;
+		agentSnapshotsOffset = Math.max(0, agentSnapshotsOffset - agentSnapshotsLimit);
+		loadAgentSnapshots();
 	}
 
 	async function replayAgentRun(run: AgentRun) {
@@ -857,6 +915,13 @@
 				runsLoading={agentRunsLoading}
 				runsError={agentRunsError}
 				actionError={agentRunsActionError}
+				snapshots={agentSnapshots}
+				snapshotsLoading={agentSnapshotsLoading}
+				snapshotsError={agentSnapshotsError}
+				snapshotsPageSize={agentSnapshotsLimit}
+				snapshotsPageOffset={agentSnapshotsOffset}
+				snapshotsHasNext={agentSnapshotsHasNext}
+				snapshotsTotal={agentSnapshotsTotal}
 				pageSize={agentRunsLimit}
 				pageOffset={agentRunsOffset}
 				hasNext={agentRunsHasNext}
@@ -866,8 +931,11 @@
 				onRefresh={() => {
 					loadAgentTools();
 					loadAgentRuns();
+					loadAgentSnapshots();
 				}}
 				onReplayRun={replayAgentRun}
+				onPrevSnapshotsPage={prevAgentSnapshotsPage}
+				onNextSnapshotsPage={nextAgentSnapshotsPage}
 			/>
 		{:else}
 			<div class="welcome">

@@ -24,6 +24,15 @@
 		}[];
 	};
 
+	type AgentSnapshot = {
+		id: string;
+		kind: string;
+		target_path: string;
+		created_at: string;
+		run_id?: string | null;
+		details?: Record<string, unknown> | null;
+	};
+
 	export let tools: AgentTool[] = [];
 	export let toolsLoading = false;
 	export let toolsError = "";
@@ -31,6 +40,13 @@
 	export let runsLoading = false;
 	export let runsError = "";
 	export let actionError = "";
+	export let snapshots: AgentSnapshot[] = [];
+	export let snapshotsLoading = false;
+	export let snapshotsError = "";
+	export let snapshotsPageSize = 10;
+	export let snapshotsPageOffset = 0;
+	export let snapshotsHasNext = false;
+	export let snapshotsTotal: number | null = null;
 	export let pageSize = 10;
 	export let pageOffset = 0;
 	export let hasNext = false;
@@ -58,12 +74,19 @@
 	}
 	export let onRefresh: () => void;
 	export let onReplayRun: (run: AgentRun) => void;
+	export let onPrevSnapshotsPage: () => void;
+	export let onNextSnapshotsPage: () => void;
 
 	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
 	$: rangeStart = runs.length ? pageOffset + 1 : 0;
 	$: rangeEnd = totalCount !== null
 		? Math.min(pageOffset + runs.length, totalCount)
 		: pageOffset + runs.length;
+	$: snapshotsPageNumber = Math.floor(snapshotsPageOffset / snapshotsPageSize) + 1;
+	$: snapshotsRangeStart = snapshots.length ? snapshotsPageOffset + 1 : 0;
+	$: snapshotsRangeEnd = snapshotsTotal !== null
+		? Math.min(snapshotsPageOffset + snapshots.length, snapshotsTotal)
+		: snapshotsPageOffset + snapshots.length;
 </script>
 
 <div class="card">
@@ -126,9 +149,6 @@
 					{#if run.plan.steps.length}
 						<div class="summary">
 							<strong>Steps</strong>
-								{#if actionError}
-									<p class="error">{actionError}</p>
-								{/if}
 							<ul>
 								{#each run.plan.steps as step}
 									{@const entry = stepLog(run, step.id)}
@@ -153,6 +173,9 @@
 			{/each}
 		</ul>
 	{/if}
+	{#if actionError}
+		<p class="error">{actionError}</p>
+	{/if}
 
 	{#if !runsLoading && !runsError && runs.length && (hasNext || pageOffset > 0)}
 		<div class="pager">
@@ -168,6 +191,50 @@
 					Previous
 				</button>
 				<button class="secondary" on:click={onNextPage} disabled={!hasNext}>
+					Next
+				</button>
+			</div>
+		</div>
+	{/if}
+
+	<div class="summary">
+		<strong>Snapshots</strong>
+	</div>
+	{#if snapshotsLoading}
+		<p class="muted">Loading snapshots…</p>
+	{:else if snapshotsError}
+		<p class="error">{snapshotsError}</p>
+	{:else if snapshots.length === 0}
+		<p class="muted">No snapshots yet.</p>
+	{:else}
+		<ul>
+			{#each snapshots as snapshot}
+				<li>
+					<strong>{snapshot.kind}</strong>
+					<span>Path: {snapshot.target_path}</span>
+					<span>Created: {new Date(snapshot.created_at).toLocaleString()}</span>
+					{#if snapshot.run_id}
+						<span>Run: {snapshot.run_id}</span>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+	{/if}
+
+	{#if !snapshotsLoading && !snapshotsError && snapshots.length && (snapshotsHasNext || snapshotsPageOffset > 0)}
+		<div class="pager">
+			<span class="pager__info">
+				{#if snapshotsTotal !== null}
+					Showing {snapshotsRangeStart}–{snapshotsRangeEnd} of {snapshotsTotal} · Page {snapshotsPageNumber}
+				{:else}
+					Showing {snapshotsRangeStart}–{snapshotsRangeEnd} · Page {snapshotsPageNumber}
+				{/if}
+			</span>
+			<div class="pager__actions">
+				<button class="secondary" on:click={onPrevSnapshotsPage} disabled={snapshotsPageOffset === 0}>
+					Previous
+				</button>
+				<button class="secondary" on:click={onNextSnapshotsPage} disabled={!snapshotsHasNext}>
 					Next
 				</button>
 			</div>
