@@ -728,6 +728,44 @@
 		}
 	}
 
+	async function editAgentSkill(skill: AgentSkill) {
+		if (!selectedProjectId) return;
+		const name = prompt('Skill name', skill.name);
+		if (!name) return;
+		const description = prompt('Description', skill.description);
+		if (!description) return;
+		const promptTemplate = prompt('Prompt template', skill.prompt_template ?? '') ?? '';
+		const toolchain = prompt(
+			'Toolchain (comma-separated)',
+			skill.toolchain?.join(', ') ?? ''
+		);
+		if (toolchain === null) return;
+		agentSkillsActionError = '';
+		try {
+			const toolchainList = toolchain
+				.split(',')
+				.map((entry) => entry.trim())
+				.filter(Boolean);
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/skills/${skill.id}`,
+				{
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						name,
+						description,
+						prompt_template: promptTemplate || null,
+						toolchain: toolchainList.length ? toolchainList : null
+					})
+				}
+			);
+			if (!res.ok) throw new Error('Failed to update skill');
+			await loadAgentSkills();
+		} catch (e) {
+			agentSkillsActionError = (e as Error).message;
+		}
+	}
+
 	function nextAgentRollbacksPage() {
 		if (!agentRollbacksHasNext) return;
 		agentRollbacksOffset += agentRollbacksLimit;
@@ -1231,6 +1269,7 @@
 				onToggle={toggleAgentSkill}
 				onDelete={deleteAgentSkill}
 				onRun={runAgentSkill}
+				onEdit={editAgentSkill}
 			/>
 		{:else}
 			<div class="welcome">

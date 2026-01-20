@@ -22,6 +22,7 @@
 	export let onCreate: () => void;
 	export let onToggle: (skill: AgentSkill) => void;
 	export let onRun: (skill: AgentSkill) => void;
+	export let onEdit: (skill: AgentSkill) => void;
 	export let onDelete: (skill: AgentSkill) => void;
 </script>
 
@@ -64,10 +65,13 @@
 						<span>Toolchain: {skill.toolchain.join(", ")}</span>
 					{/if}
 					<span>Enabled: {skill.enabled ? "Yes" : "No"}</span>
+					<div class="card__actions">
 						<button class="secondary" on:click={() => onRun(skill)}>
 							Run
 						</button>
-					<div class="card__actions">
+						<button class="secondary" on:click={() => onEdit(skill)}>
+							Edit
+						</button>
 						<button class="secondary" on:click={() => onToggle(skill)}>
 							{skill.enabled ? "Disable" : "Enable"}
 						</button>

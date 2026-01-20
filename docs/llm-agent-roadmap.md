@@ -20,6 +20,7 @@
 	- ✅ Skills UI: list/create/toggle/delete (basic)
 	- ✅ Skill → plan skeleton endpoint (toolchain to plan steps)
 	- ✅ Skills UI: run skill → plan → agent run
+	- ✅ Skills UI: edit name/description/toolchain
 	- ✅ Persisted run logs wired to UI (expandable log viewer)
 	- ⏳ Tool approval UI + apply/rollback controls (not started)
 	- ⏳ Snapshot/rollback implementation beyond metadata (not started)
