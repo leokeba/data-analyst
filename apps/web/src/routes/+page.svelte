@@ -5,6 +5,7 @@
 	import DatasetDetailCard from '$lib/components/DatasetDetailCard.svelte';
 	import RunsCard from '$lib/components/RunsCard.svelte';
 	import ReportsCard from '$lib/components/ReportsCard.svelte';
+	import AgentRunsCard from '$lib/components/AgentRunsCard.svelte';
 
 	const apiBase = 'http://localhost:8000';
 
@@ -40,6 +41,22 @@
 		path: string;
 		mime_type: string;
 		size: number;
+	};
+
+	type AgentTool = {
+		name: string;
+		description: string;
+		destructive: boolean;
+	};
+
+	type AgentRun = {
+		id: string;
+		status: string;
+		plan: {
+			objective: string;
+			steps: { id?: string; title: string; tool?: string | null }[];
+		};
+		log: Record<string, unknown>[];
 	};
 
 	// State - Projects
@@ -121,6 +138,18 @@
 	let artifactsOffset = 0;
 	let artifactsHasNext = false;
 	let artifactsTotal: number | null = null;
+
+	// State - Agent runs/tools
+	let agentTools: AgentTool[] = [];
+	let agentToolsLoading = false;
+	let agentToolsError = '';
+	let agentRuns: AgentRun[] = [];
+	let agentRunsLoading = false;
+	let agentRunsError = '';
+	let agentRunsLimit = 10;
+	let agentRunsOffset = 0;
+	let agentRunsHasNext = false;
+	let agentRunsTotal: number | null = null;
 
 	// Derived
 	$: if (selectedDatasetId && datasets.length) {
@@ -257,7 +286,8 @@
 		datasetsOffset = 0;
 		runsOffset = 0;
 		artifactsOffset = 0;
-		await Promise.all([loadDatasets(), loadRuns()]);
+		agentRunsOffset = 0;
+		await Promise.all([loadDatasets(), loadRuns(), loadAgentTools(), loadAgentRuns()]);
 	}
 
 	// Datasets
@@ -414,6 +444,56 @@
 		} finally {
 			runsLoading = false;
 		}
+	}
+
+	// Agent tools/runs
+	async function loadAgentTools() {
+		if (!selectedProjectId) return;
+		agentToolsLoading = true;
+		agentToolsError = '';
+		try {
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/agent/tools`);
+			if (!res.ok) throw new Error('Failed to fetch agent tools');
+			agentTools = await res.json();
+		} catch (e) {
+			agentToolsError = (e as Error).message;
+		} finally {
+			agentToolsLoading = false;
+		}
+	}
+
+	async function loadAgentRuns() {
+		if (!selectedProjectId) return;
+		agentRunsLoading = true;
+		agentRunsError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/runs?limit=${agentRunsLimit}&offset=${agentRunsOffset}`
+			);
+			if (!res.ok) throw new Error('Failed to fetch agent runs');
+			agentRuns = await res.json();
+			const totalHeader = res.headers.get('x-total-count');
+			agentRunsTotal = totalHeader ? Number(totalHeader) : null;
+			agentRunsHasNext = agentRunsTotal !== null
+				? agentRunsOffset + agentRunsLimit < agentRunsTotal
+				: agentRuns.length === agentRunsLimit;
+		} catch (e) {
+			agentRunsError = (e as Error).message;
+		} finally {
+			agentRunsLoading = false;
+		}
+	}
+
+	function nextAgentRunsPage() {
+		if (!agentRunsHasNext) return;
+		agentRunsOffset += agentRunsLimit;
+		loadAgentRuns();
+	}
+
+	function prevAgentRunsPage() {
+		if (agentRunsOffset === 0) return;
+		agentRunsOffset = Math.max(0, agentRunsOffset - agentRunsLimit);
+		loadAgentRuns();
 	}
 
 	function nextRunsPage() {
@@ -734,6 +814,25 @@
 					onRerunSelected={rerunSelected}
 				/>
 			{/if}
+
+			<AgentRunsCard
+				tools={agentTools}
+				toolsLoading={agentToolsLoading}
+				toolsError={agentToolsError}
+				runs={agentRuns}
+				runsLoading={agentRunsLoading}
+				runsError={agentRunsError}
+				pageSize={agentRunsLimit}
+				pageOffset={agentRunsOffset}
+				hasNext={agentRunsHasNext}
+				totalCount={agentRunsTotal}
+				onPrevPage={prevAgentRunsPage}
+				onNextPage={nextAgentRunsPage}
+				onRefresh={() => {
+					loadAgentTools();
+					loadAgentRuns();
+				}}
+			/>
 		{:else}
 			<div class="welcome">
 				<h2>Welcome to Data Analyst</h2>
