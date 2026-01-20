@@ -4,6 +4,8 @@ import json
 import os
 from typing import Any
 
+import re
+
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
@@ -58,20 +60,41 @@ def generate_plan(
         "tools": tool_catalog,
     }
     client = _client()
-    response = client.chat.completions.create(
-        model=_model_name(),
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": json.dumps(user_payload)},
-        ],
-        temperature=0.2,
-    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": json.dumps(user_payload)},
+    ]
+    try:
+        response = client.chat.completions.create(
+            model=_model_name(),
+            messages=messages,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+    except Exception:
+        try:
+            response = client.chat.completions.create(
+                model=_model_name(),
+                messages=messages,
+                temperature=0.2,
+            )
+        except Exception as exc:
+            raise LLMError(f"LLM request failed: {exc}") from exc
+
     content = response.choices[0].message.content or ""
+    payload = None
     try:
         payload = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise LLMError(f"Invalid JSON from LLM: {exc}") from exc
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except json.JSONDecodeError as exc:
+                raise LLMError(f"Invalid JSON from LLM: {exc}") from exc
+        else:
+            raise LLMError("LLM response did not include JSON content")
     try:
-        return PlanPayload(**payload)
+        return PlanPayload(**(payload or {}))
     except ValidationError as exc:
         raise LLMError(f"Invalid plan payload from LLM: {exc}") from exc
