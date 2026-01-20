@@ -95,6 +95,22 @@ def _tool_list_project_runs_factory(project_id: str):
     )
 
 
+def _tool_list_artifacts_factory(project_id: str):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        run_id = args.get("run_id")
+        limit = int(args.get("limit", 100))
+        offset = int(args.get("offset", 0))
+        artifacts = store.list_project_artifacts(project_id, run_id=run_id, limit=limit, offset=offset)
+        return ToolResult(output={"artifacts": [artifact.model_dump() for artifact in artifacts]})
+
+    return ToolDefinition(
+        name="list_artifacts",
+        description="List artifacts for the project (optional run_id filter).",
+        handler=_handler,
+        destructive=False,
+    )
+
+
 def _build_plan(payload: AgentPlanCreate) -> Plan:
     steps: list[PlanStep] = []
     for step in payload.steps:
@@ -150,6 +166,7 @@ def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
     router.register(_tool_preview_factory(project_id))
     router.register(_tool_list_datasets_factory(project_id))
     router.register(_tool_list_project_runs_factory(project_id))
+    router.register(_tool_list_artifacts_factory(project_id))
     return router, policy
 
 

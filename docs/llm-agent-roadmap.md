@@ -4,7 +4,7 @@
 - Phase 1: Core orchestration — **in progress**
 	- ✅ Agent runtime skeleton (plan/steps, tool router, journal, snapshots)
 	- ✅ Agent API endpoints: create run, get run, list runs, list tools
-	- ✅ Initial agent tools: create run, preview dataset, list datasets, list project runs
+	- ✅ Initial agent tools: create run, preview dataset, list datasets, list project runs, list artifacts
 	- ✅ Agent runs UI: tool inventory, run list, per-step status, completion %, replay action
 	- ⏳ Persisted run logs wired to UI (not started)
 	- ⏳ Tool approval UI + apply/rollback controls (not started)
