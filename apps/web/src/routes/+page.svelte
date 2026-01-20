@@ -1336,6 +1336,22 @@
 			onDelete={deleteProject}
 			onSelect={selectProject}
 		/>
+
+		{#if selectedProjectId}
+			<AgentChatSidebar
+				messages={chatMessages}
+				bind:input={chatInput}
+				error={chatError}
+				loadingPreview={chatLoadingPreview}
+				safeMode={agentSafeMode}
+				onToggleSafeMode={toggleAgentSafeMode}
+				onSend={sendChatMessage}
+				onAttachDatasetPreview={attachDatasetPreviewToChat}
+				onAttachRunLog={attachLatestRunLogToChat}
+				onUndo={undoLatestAgentSnapshot}
+				onRedo={redoLatestAgentRun}
+			/>
+		{/if}
 	</div>
 	<div class="main">
 		{#if selectedProjectId}
@@ -1531,23 +1547,6 @@
 			</div>
 		{/if}
 	</div>
-	<div class="aside">
-		{#if selectedProjectId}
-			<AgentChatSidebar
-				messages={chatMessages}
-				bind:input={chatInput}
-				error={chatError}
-				loadingPreview={chatLoadingPreview}
-				safeMode={agentSafeMode}
-				onToggleSafeMode={toggleAgentSafeMode}
-				onSend={sendChatMessage}
-				onAttachDatasetPreview={attachDatasetPreviewToChat}
-				onAttachRunLog={attachLatestRunLogToChat}
-				onUndo={undoLatestAgentSnapshot}
-				onRedo={redoLatestAgentRun}
-			/>
-		{/if}
-	</div>
 </div>
 
 <style>
@@ -1560,7 +1559,7 @@
 	}
 	.layout {
 		display: grid;
-		grid-template-columns: 320px 1fr 320px;
+		grid-template-columns: 320px 1fr;
 		gap: 24px;
 		max-width: 1400px;
 		margin: 0 auto;
@@ -1571,11 +1570,6 @@
 		gap: 24px;
 	}
 	.main {
-		display: flex;
-		flex-direction: column;
-		gap: 24px;
-	}
-	.aside {
 		display: flex;
 		flex-direction: column;
 		gap: 24px;

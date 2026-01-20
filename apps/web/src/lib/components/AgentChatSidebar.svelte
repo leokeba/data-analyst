@@ -91,11 +91,6 @@
 </aside>
 
 <style>
-	.chat-sidebar {
-		position: sticky;
-		top: 20px;
-		align-self: start;
-	}
 	.chat-messages {
 		display: flex;
 		flex-direction: column;
