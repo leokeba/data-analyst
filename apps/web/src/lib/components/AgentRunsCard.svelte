@@ -9,10 +9,14 @@
 		id: string;
 		status: string;
 		plan: {
+			objective: string;
 			steps: { id?: string; title: string; tool?: string | null }[];
-			steps: { id?: string; title: string; tool?: string | null }[];
-		log: Record<string, unknown>[];
-		log: Record<string, unknown>[];
+		};
+		log: {
+			step_id?: string;
+			status?: string;
+			approvals?: { approved_by?: string; approved_at?: string; note?: string | null }[];
+		}[];
 	};
 
 	export let tools: AgentTool[] = [];
@@ -32,6 +36,19 @@
 		if (!stepId) return "pending";
 		const entry = run.log.find((item) => item.step_id === stepId);
 		return (entry?.status as string) ?? "pending";
+	}
+
+	function stepLog(run: AgentRun, stepId?: string) {
+		if (!stepId) return undefined;
+		return run.log.find((item) => item.step_id === stepId);
+	}
+
+	function completionPercent(run: AgentRun) {
+		if (!run.plan.steps.length) return 0;
+		const applied = run.plan.steps.filter(
+			(step) => stepStatus(run, step.id) === "applied"
+		).length;
+		return Math.round((applied / run.plan.steps.length) * 100);
 	}
 	export let onRefresh: () => void;
 
@@ -92,16 +109,23 @@
 					<strong>{run.plan.objective || "Untitled plan"}</strong>
 					<span>Status: {run.status}</span>
 					<span>Steps: {run.plan.steps.length}</span>
+					<span>Completion: {completionPercent(run)}%</span>
 					<span>Run id: {run.id}</span>
 					{#if run.plan.steps.length}
 						<div class="summary">
 							<strong>Steps</strong>
 							<ul>
 								{#each run.plan.steps as step}
+									{@const entry = stepLog(run, step.id)}
 									<li>
 										<strong>{step.title}</strong>
 										<span>Tool: {step.tool ?? "—"}</span>
 										<span>Status: {stepStatus(run, step.id)}</span>
+										{#if entry?.approvals?.length}
+											<span>
+												Approvals: {entry.approvals.length}
+											</span>
+										{/if}
 									</li>
 								{/each}
 							</ul>
