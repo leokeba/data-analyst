@@ -6,6 +6,7 @@
 	import RunsCard from '$lib/components/RunsCard.svelte';
 	import ReportsCard from '$lib/components/ReportsCard.svelte';
 	import AgentRunsCard from '$lib/components/AgentRunsCard.svelte';
+	import AgentSkillsCard from '$lib/components/AgentSkillsCard.svelte';
 
 	const apiBase = 'http://localhost:8000';
 
@@ -82,6 +83,18 @@
 		status: string;
 		created_at: string;
 		note?: string | null;
+	};
+
+	type AgentSkill = {
+		id: string;
+		project_id: string;
+		name: string;
+		description: string;
+		prompt_template?: string | null;
+		toolchain?: string[] | null;
+		enabled: boolean;
+		created_at: string;
+		updated_at: string;
 	};
 
 	// State - Projects
@@ -191,6 +204,15 @@
 	let agentRollbacksOffset = 0;
 	let agentRollbacksHasNext = false;
 	let agentRollbacksTotal: number | null = null;
+	let agentSkills: AgentSkill[] = [];
+	let agentSkillsLoading = false;
+	let agentSkillsError = '';
+	let agentSkillsActionError = '';
+	let skillName = '';
+	let skillDescription = '';
+	let skillPromptTemplate = '';
+	let skillToolchain = '';
+	let isCreatingSkill = false;
 
 	// Derived
 	$: if (selectedDatasetId && datasets.length) {
@@ -335,7 +357,8 @@
 			loadAgentTools(),
 			loadAgentRuns(),
 			loadAgentSnapshots(),
-			loadAgentRollbacks()
+			loadAgentRollbacks(),
+			loadAgentSkills()
 		]);
 	}
 
@@ -586,6 +609,89 @@
 			agentRollbacksError = (e as Error).message;
 		} finally {
 			agentRollbacksLoading = false;
+		}
+	}
+
+	async function loadAgentSkills() {
+		if (!selectedProjectId) return;
+		agentSkillsLoading = true;
+		agentSkillsError = '';
+		try {
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/agent/skills`);
+			if (!res.ok) throw new Error('Failed to fetch skills');
+			agentSkills = await res.json();
+		} catch (e) {
+			agentSkillsError = (e as Error).message;
+		} finally {
+			agentSkillsLoading = false;
+		}
+	}
+
+	async function createAgentSkill() {
+		if (!selectedProjectId || !skillName || !skillDescription) return;
+		isCreatingSkill = true;
+		agentSkillsActionError = '';
+		try {
+			const toolchain = skillToolchain
+				.split(',')
+				.map((entry) => entry.trim())
+				.filter(Boolean);
+			const res = await fetch(`${apiBase}/projects/${selectedProjectId}/agent/skills`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					name: skillName,
+					description: skillDescription,
+					prompt_template: skillPromptTemplate || null,
+					toolchain: toolchain.length ? toolchain : null,
+					enabled: true
+				})
+			});
+			if (!res.ok) throw new Error('Failed to create skill');
+			skillName = '';
+			skillDescription = '';
+			skillPromptTemplate = '';
+			skillToolchain = '';
+			await loadAgentSkills();
+		} catch (e) {
+			agentSkillsActionError = (e as Error).message;
+		} finally {
+			isCreatingSkill = false;
+		}
+	}
+
+	async function toggleAgentSkill(skill: AgentSkill) {
+		if (!selectedProjectId) return;
+		agentSkillsActionError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/skills/${skill.id}`,
+				{
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ enabled: !skill.enabled })
+				}
+			);
+			if (!res.ok) throw new Error('Failed to update skill');
+			await loadAgentSkills();
+		} catch (e) {
+			agentSkillsActionError = (e as Error).message;
+		}
+	}
+
+	async function deleteAgentSkill(skill: AgentSkill) {
+		if (!selectedProjectId) return;
+		if (!confirm('Delete this skill?')) return;
+		agentSkillsActionError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/skills/${skill.id}`,
+				{ method: 'DELETE' }
+			);
+			if (!res.ok) throw new Error('Failed to delete skill');
+			await loadAgentSkills();
+		} catch (e) {
+			agentSkillsActionError = (e as Error).message;
 		}
 	}
 
@@ -1059,6 +1165,21 @@
 				onNextRollbacksPage={nextAgentRollbacksPage}
 				onApplyRollback={applyAgentRollback}
 				onCancelRollback={cancelAgentRollback}
+			/>
+
+			<AgentSkillsCard
+				skills={agentSkills}
+				loading={agentSkillsLoading}
+				error={agentSkillsError}
+				actionError={agentSkillsActionError}
+				bind:name={skillName}
+				bind:description={skillDescription}
+				bind:promptTemplate={skillPromptTemplate}
+				bind:toolchain={skillToolchain}
+				isCreating={isCreatingSkill}
+				onCreate={createAgentSkill}
+				onToggle={toggleAgentSkill}
+				onDelete={deleteAgentSkill}
 			/>
 		{:else}
 			<div class="welcome">
