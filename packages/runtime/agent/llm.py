@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
-
 import re
+from typing import Any
 
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
@@ -60,41 +59,59 @@ def generate_plan(
         "tools": tool_catalog,
     }
     client = _client()
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": json.dumps(user_payload)},
-    ]
-    try:
-        response = client.chat.completions.create(
-            model=_model_name(),
-            messages=messages,
-            temperature=0.2,
-            response_format={"type": "json_object"},
-        )
-    except Exception:
-        try:
-            response = client.chat.completions.create(
-                model=_model_name(),
-                messages=messages,
-                temperature=0.2,
-            )
-        except Exception as exc:
-            raise LLMError(f"LLM request failed: {exc}") from exc
-
-    content = response.choices[0].message.content or ""
-    payload = None
+    response = client.responses.create(
+        model=_model_name(),
+        input=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(user_payload)},
+        ],
+    )
+    content = getattr(response, "output_text", None) or ""
+    if not content:
+        output = getattr(response, "output", []) or []
+        for item in output:
+            if getattr(item, "type", None) != "message":
+                continue
+            message_content = getattr(item, "content", []) or []
+            for part in message_content:
+                if getattr(part, "type", None) == "output_text":
+                    content = getattr(part, "text", "") or ""
+                    if content:
+                        break
+            if content:
+                break
     try:
         payload = json.loads(content)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            try:
-                payload = json.loads(match.group(0))
-            except json.JSONDecodeError as exc:
-                raise LLMError(f"Invalid JSON from LLM: {exc}") from exc
-        else:
-            raise LLMError("LLM response did not include JSON content")
+    except json.JSONDecodeError as exc:
+        payload = _extract_json_payload(content)
+        if payload is None:
+            preview = content.replace("\n", " ").strip()
+            if len(preview) > 500:
+                preview = preview[:500] + "..."
+            raise LLMError(
+                f"Invalid JSON from LLM: {exc}. Raw content preview: {preview}"
+            ) from exc
     try:
-        return PlanPayload(**(payload or {}))
+        return PlanPayload(**payload)
     except ValidationError as exc:
-        raise LLMError(f"Invalid plan payload from LLM: {exc}") from exc
+        preview = content.replace("\n", " ").strip()
+        if len(preview) > 500:
+            preview = preview[:500] + "..."
+        raise LLMError(
+            f"Invalid plan payload from LLM: {exc}. Raw content preview: {preview}"
+        ) from exc
+
+
+def _extract_json_payload(content: str) -> dict[str, Any] | None:
+    text = content.strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = text.strip("`")
+        text = re.sub(r"^json\s*", "", text)
+        text = text.strip()
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
