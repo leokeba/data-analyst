@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
+import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -32,6 +36,7 @@ from app.services import store
 from app.services.db import get_engine, get_session
 from packages.runtime.agent import (
     ActionJournal,
+    ActionRecord,
     AgentPolicy,
     AgentRuntime,
     Approval,
@@ -46,6 +51,8 @@ from packages.runtime.agent import (
     generate_plan,
     validate_path,
 )
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import ToolCallPart, ToolReturnPart, TextPart
 
 
 def _tool_run_factory(project_id: str):
@@ -124,6 +131,258 @@ def _tool_list_artifacts_factory(project_id: str):
         description="List artifacts for the project (optional run_id filter).",
         handler=_handler,
         destructive=False,
+    )
+
+
+def _tool_list_dir_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        path_value = str(args.get("path") or "")
+        depth = int(args.get("depth", 1))
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
+        base_path = Path(project.workspace_path).resolve()
+        if path_value:
+            target = validate_path(path_value, policy)
+        else:
+            target = base_path
+        if not target.exists():
+            raise ValueError("Path does not exist")
+        if target.is_file():
+            return ToolResult(output={"path": str(target), "entries": []})
+        max_depth = max(depth, 0)
+        entries: list[dict[str, Any]] = []
+        for root, dirs, files in os.walk(target):
+            current_depth = len(Path(root).relative_to(target).parts)
+            if current_depth > max_depth:
+                dirs[:] = []
+                continue
+            for name in sorted(dirs):
+                entries.append({"path": str(Path(root) / name), "type": "dir"})
+            for name in sorted(files):
+                entries.append({"path": str(Path(root) / name), "type": "file"})
+        return ToolResult(output={"path": str(target), "entries": entries})
+
+    return ToolDefinition(
+        name="list_dir",
+        description="List files and folders in a workspace directory.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _tool_read_file_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        path_value = str(args.get("path") or "")
+        start_line = args.get("start_line")
+        end_line = args.get("end_line")
+        max_bytes = int(args.get("max_bytes", policy.max_data_bytes))
+        if not path_value:
+            raise ValueError("Path is required")
+        resolved = validate_path(path_value, policy)
+        if not resolved.is_file():
+            raise ValueError("File not found")
+        text = resolved.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        if start_line is not None or end_line is not None:
+            start_idx = max(int(start_line or 1) - 1, 0)
+            end_idx = int(end_line) if end_line is not None else len(lines)
+            sliced = lines[start_idx:end_idx]
+            content = "\n".join(sliced)
+        else:
+            content = text
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > max_bytes:
+            content = content_bytes[:max_bytes].decode("utf-8", errors="replace")
+        return ToolResult(
+            output={
+                "path": str(resolved),
+                "content": content,
+                "lines": len(lines),
+                "truncated": len(content_bytes) > max_bytes,
+            }
+        )
+
+    return ToolDefinition(
+        name="read_file",
+        description="Read a text file from the workspace with optional line ranges.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _tool_grep_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        pattern = str(args.get("pattern") or "")
+        path_value = str(args.get("path") or "")
+        regex = bool(args.get("regex", False))
+        max_matches = int(args.get("max_matches", 50))
+        if not pattern:
+            raise ValueError("Pattern is required")
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
+        base_path = Path(project.workspace_path).resolve()
+        target = validate_path(path_value, policy) if path_value else base_path
+        if not target.exists():
+            raise ValueError("Path does not exist")
+        compiled = re.compile(pattern) if regex else None
+        matches: list[dict[str, Any]] = []
+        paths = [target]
+        if target.is_dir():
+            paths = [path for path in target.rglob("*") if path.is_file()]
+        for candidate in paths:
+            try:
+                content = candidate.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            for idx, line in enumerate(content.splitlines(), start=1):
+                found = bool(compiled.search(line)) if compiled else pattern in line
+                if found:
+                    matches.append({"path": str(candidate), "line": idx, "text": line})
+                    if len(matches) >= max_matches:
+                        return ToolResult(output={"matches": matches, "truncated": True})
+        return ToolResult(output={"matches": matches, "truncated": False})
+
+    return ToolDefinition(
+        name="grep",
+        description="Search for a pattern in files under a path.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
+def _tool_append_file_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        path_value = str(args.get("path") or "")
+        content = str(args.get("content") or "")
+        if not path_value:
+            raise ValueError("Path is required")
+        resolved = validate_path(path_value, policy)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        with resolved.open("a", encoding="utf-8") as handle:
+            handle.write(content)
+        artifact = _upsert_agent_artifact(
+            project_id,
+            None,
+            None,
+            "text_file",
+            resolved,
+            "text/plain",
+        )
+        return ToolResult(
+            output={"path": str(resolved), "bytes": resolved.stat().st_size},
+            artifacts=[artifact.id],
+        )
+
+    return ToolDefinition(
+        name="append_file",
+        description="Append text content to a file in the project workspace.",
+        handler=_handler,
+        destructive=True,
+    )
+
+
+def _tool_replace_text_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        path_value = str(args.get("path") or "")
+        old_text = str(args.get("old") or "")
+        new_text = str(args.get("new") or "")
+        count = args.get("count")
+        if not path_value:
+            raise ValueError("Path is required")
+        if not old_text:
+            raise ValueError("Old text is required")
+        resolved = validate_path(path_value, policy)
+        if not resolved.is_file():
+            raise ValueError("File not found")
+        content = resolved.read_text(encoding="utf-8", errors="replace")
+        replace_count = int(count) if count is not None else -1
+        updated = content.replace(old_text, new_text, replace_count)
+        if updated == content:
+            raise ValueError("No matches found for replacement")
+        resolved.write_text(updated, encoding="utf-8")
+        artifact = _upsert_agent_artifact(
+            project_id,
+            None,
+            None,
+            "text_file",
+            resolved,
+            "text/plain",
+        )
+        return ToolResult(
+            output={"path": str(resolved), "bytes": resolved.stat().st_size},
+            artifacts=[artifact.id],
+        )
+
+    return ToolDefinition(
+        name="replace_text",
+        description="Replace text in a file in the project workspace.",
+        handler=_handler,
+        destructive=True,
+    )
+
+
+def _tool_run_shell_factory(project_id: str, policy: AgentPolicy):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        command = str(args.get("command") or "")
+        cwd_value = str(args.get("cwd") or "")
+        timeout = int(args.get("timeout", 30))
+        if not command:
+            raise ValueError("Command is required")
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
+        if cwd_value:
+            cwd = validate_path(cwd_value, policy)
+        else:
+            cwd = Path(project.workspace_path).resolve()
+        argv = shlex.split(command)
+        result = subprocess.run(
+            argv,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        output_text = "".join(
+            [
+                "STDOUT:\n",
+                result.stdout or "",
+                "\nSTDERR:\n",
+                result.stderr or "",
+            ]
+        )
+        artifacts_dir = _agent_artifacts_dir(project_id)
+        if not artifacts_dir:
+            raise ValueError("Artifacts directory unavailable")
+        out_path = artifacts_dir / f"agent-shell-{uuid4().hex}.txt"
+        out_path.write_text(output_text)
+        artifact = _upsert_agent_artifact(
+            project_id,
+            None,
+            None,
+            "shell_output",
+            out_path,
+            "text/plain",
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Command failed ({result.returncode}): {result.stderr}")
+        return ToolResult(
+            output={
+                "command": command,
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+            artifacts=[artifact.id],
+        )
+
+    return ToolDefinition(
+        name="run_shell",
+        description="Run a shell command inside the project workspace.",
+        handler=_handler,
+        destructive=True,
     )
 
 
@@ -462,6 +721,19 @@ def _plan_to_payload(plan: Plan) -> AgentPlanCreate:
 
 def _tool_catalog(router: ToolRouter) -> list[dict[str, Any]]:
     arg_hints = {
+        "list_dir": {"path": "string (optional)", "depth": "int"},
+        "read_file": {
+            "path": "string",
+            "start_line": "int (optional)",
+            "end_line": "int (optional)",
+            "max_bytes": "int (optional)",
+        },
+        "grep": {
+            "pattern": "string",
+            "path": "string (optional)",
+            "regex": "bool (optional)",
+            "max_matches": "int (optional)",
+        },
         "list_datasets": {},
         "preview_dataset": {"dataset_id": "string"},
         "list_project_runs": {},
@@ -470,8 +742,16 @@ def _tool_catalog(router: ToolRouter) -> list[dict[str, Any]]:
         "list_db_tables": {"db_path": "string (optional)"},
         "query_db": {"sql": "string", "db_path": "string (optional)", "limit": "int"},
         "write_file": {"path": "string", "content": "string"},
+        "append_file": {"path": "string", "content": "string"},
+        "replace_text": {
+            "path": "string",
+            "old": "string",
+            "new": "string",
+            "count": "int (optional)",
+        },
         "write_markdown": {"path": "string", "content": "string"},
         "run_python": {"code": "string (optional)", "path": "string (optional)"},
+        "run_shell": {"command": "string", "cwd": "string (optional)", "timeout": "int (optional)"},
         "create_run": {"dataset_id": "string", "type": "ingest|profile|analysis|report"},
         "create_snapshot": {"kind": "string", "path": "string", "run_id": "string (optional)"},
         "request_rollback": {"run_id": "string (optional)", "snapshot_id": "string (optional)"},
@@ -517,6 +797,9 @@ def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
     allowed_paths = [project.workspace_path] if project else []
     policy = AgentPolicy(allowed_paths=allowed_paths)
     router = ToolRouter(policy)
+    router.register(_tool_list_dir_factory(project_id, policy))
+    router.register(_tool_read_file_factory(project_id, policy))
+    router.register(_tool_grep_factory(project_id, policy))
     router.register(_tool_run_factory(project_id))
     router.register(_tool_preview_factory(project_id))
     router.register(_tool_list_datasets_factory(project_id))
@@ -526,8 +809,11 @@ def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
     router.register(_tool_list_db_tables_factory(project_id, policy))
     router.register(_tool_query_db_factory(project_id, policy))
     router.register(_tool_write_file_factory(project_id, policy))
+    router.register(_tool_append_file_factory(project_id, policy))
+    router.register(_tool_replace_text_factory(project_id, policy))
     router.register(_tool_write_markdown_factory(project_id, policy))
     router.register(_tool_run_python_factory(project_id, policy))
+    router.register(_tool_run_shell_factory(project_id, policy))
     router.register(_tool_create_snapshot_factory(project_id))
     router.register(_tool_request_rollback_factory(project_id))
     return router, policy
@@ -1111,6 +1397,290 @@ def count_chat_messages(project_id: str) -> int:
     return int(total)
 
 
+@dataclass
+class PydanticAgentDeps:
+    project_id: str
+    safe_mode: bool
+    router: ToolRouter
+
+
+def _pydantic_ai_model_name() -> str:
+    model_name = os.getenv("AGENT_MODEL") or os.getenv("OPENAI_MODEL") or "openai:gpt-4o-mini"
+    if ":" in model_name:
+        return model_name
+    return f"openai:{model_name}"
+
+
+def _extract_text_response(response: Any) -> str:
+    if response is None:
+        return ""
+    parts = getattr(response, "parts", []) or []
+    chunks: list[str] = []
+    for part in parts:
+        if isinstance(part, TextPart):
+            chunks.append(getattr(part, "text", ""))
+    return "".join(chunks).strip()
+
+
+def _call_router_tool(ctx: RunContext[PydanticAgentDeps], name: str, args: dict[str, Any]) -> dict[str, Any]:
+    tools = {tool.name: tool for tool in ctx.deps.router.list_tools()}
+    tool = tools.get(name)
+    if not tool:
+        raise ValueError(f"Tool not registered: {name}")
+    if ctx.deps.safe_mode and tool.destructive:
+        raise ValueError(f"Tool not allowed in safe mode: {name}")
+    result = ctx.deps.router.call(name, args, approved=not ctx.deps.safe_mode)
+    return result.output or {}
+
+
+def _build_pydantic_agent(project_id: str, safe_mode: bool) -> tuple[Agent, PydanticAgentDeps]:
+    router, _ = _build_router(project_id)
+    instructions = (
+        "You are a project automation agent. Use the available tools to navigate the workspace, "
+        "inspect files, write code, run scripts, and report results. "
+        "If a tool fails, inspect outputs and retry with a fix. "
+        "Prefer deterministic, auditable actions. "
+        f"Safe mode is {'enabled' if safe_mode else 'disabled'}; if enabled, avoid destructive tools."
+    )
+    agent = Agent(
+        _pydantic_ai_model_name(),
+        deps_type=PydanticAgentDeps,
+        instructions=instructions,
+    )
+
+    @agent.tool(name="list_dir", description="List files and folders under a path.")
+    def _list_dir(ctx: RunContext[PydanticAgentDeps], path: str | None = None, depth: int = 1) -> dict[str, Any]:
+        args: dict[str, Any] = {"depth": depth}
+        if path:
+            args["path"] = path
+        return _call_router_tool(ctx, "list_dir", args)
+
+    @agent.tool(name="read_file", description="Read a file from the workspace.")
+    def _read_file(
+        ctx: RunContext[PydanticAgentDeps],
+        path: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        max_bytes: int | None = None,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {"path": path}
+        if start_line is not None:
+            args["start_line"] = start_line
+        if end_line is not None:
+            args["end_line"] = end_line
+        if max_bytes is not None:
+            args["max_bytes"] = max_bytes
+        return _call_router_tool(ctx, "read_file", args)
+
+    @agent.tool(name="grep", description="Search for a pattern in files.")
+    def _grep(
+        ctx: RunContext[PydanticAgentDeps],
+        pattern: str,
+        path: str | None = None,
+        regex: bool = False,
+        max_matches: int = 50,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {
+            "pattern": pattern,
+            "regex": regex,
+            "max_matches": max_matches,
+        }
+        if path:
+            args["path"] = path
+        return _call_router_tool(ctx, "grep", args)
+
+    @agent.tool(name="list_datasets", description="List datasets in the project.")
+    def _list_datasets(ctx: RunContext[PydanticAgentDeps]) -> dict[str, Any]:
+        return _call_router_tool(ctx, "list_datasets", {})
+
+    @agent.tool(name="preview_dataset", description="Preview a dataset by id.")
+    def _preview_dataset(ctx: RunContext[PydanticAgentDeps], dataset_id: str) -> dict[str, Any]:
+        return _call_router_tool(ctx, "preview_dataset", {"dataset_id": dataset_id})
+
+    @agent.tool(name="list_project_runs", description="List data runs for the project.")
+    def _list_project_runs(ctx: RunContext[PydanticAgentDeps]) -> dict[str, Any]:
+        return _call_router_tool(ctx, "list_project_runs", {})
+
+    @agent.tool(name="list_artifacts", description="List artifacts for the project.")
+    def _list_artifacts(
+        ctx: RunContext[PydanticAgentDeps],
+        run_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {"limit": limit, "offset": offset}
+        if run_id:
+            args["run_id"] = run_id
+        return _call_router_tool(ctx, "list_artifacts", args)
+
+    @agent.tool(name="write_file", description="Write text content to a file.")
+    def _write_file(ctx: RunContext[PydanticAgentDeps], path: str, content: str) -> dict[str, Any]:
+        return _call_router_tool(ctx, "write_file", {"path": path, "content": content})
+
+    @agent.tool(name="append_file", description="Append text content to a file.")
+    def _append_file(ctx: RunContext[PydanticAgentDeps], path: str, content: str) -> dict[str, Any]:
+        return _call_router_tool(ctx, "append_file", {"path": path, "content": content})
+
+    @agent.tool(name="replace_text", description="Replace text in a file.")
+    def _replace_text(
+        ctx: RunContext[PydanticAgentDeps],
+        path: str,
+        old: str,
+        new: str,
+        count: int | None = None,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {"path": path, "old": old, "new": new}
+        if count is not None:
+            args["count"] = count
+        return _call_router_tool(ctx, "replace_text", args)
+
+    @agent.tool(name="write_markdown", description="Write a markdown report file.")
+    def _write_markdown(ctx: RunContext[PydanticAgentDeps], path: str, content: str) -> dict[str, Any]:
+        return _call_router_tool(ctx, "write_markdown", {"path": path, "content": content})
+
+    @agent.tool(name="run_python", description="Run a Python script.")
+    def _run_python(
+        ctx: RunContext[PydanticAgentDeps],
+        path: str | None = None,
+        code: str | None = None,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {}
+        if path:
+            args["path"] = path
+        if code:
+            args["code"] = code
+        return _call_router_tool(ctx, "run_python", args)
+
+    @agent.tool(name="run_shell", description="Run a shell command.")
+    def _run_shell(
+        ctx: RunContext[PydanticAgentDeps],
+        command: str,
+        cwd: str | None = None,
+        timeout: int = 30,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {"command": command, "timeout": timeout}
+        if cwd:
+            args["cwd"] = cwd
+        return _call_router_tool(ctx, "run_shell", args)
+
+    @agent.tool(name="create_run", description="Create a dataset run.")
+    def _create_run(ctx: RunContext[PydanticAgentDeps], dataset_id: str, type: str) -> dict[str, Any]:
+        return _call_router_tool(ctx, "create_run", {"dataset_id": dataset_id, "type": type})
+
+    @agent.tool(name="create_snapshot", description="Create a snapshot record for a file.")
+    def _create_snapshot(
+        ctx: RunContext[PydanticAgentDeps],
+        kind: str,
+        path: str,
+        run_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {"kind": kind, "path": path}
+        if run_id:
+            args["run_id"] = run_id
+        if metadata:
+            args["metadata"] = metadata
+        return _call_router_tool(ctx, "create_snapshot", args)
+
+    @agent.tool(name="request_rollback", description="Request a rollback for a run or snapshot.")
+    def _request_rollback(
+        ctx: RunContext[PydanticAgentDeps],
+        run_id: str | None = None,
+        snapshot_id: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {}
+        if run_id:
+            args["run_id"] = run_id
+        if snapshot_id:
+            args["snapshot_id"] = snapshot_id
+        if note:
+            args["note"] = note
+        return _call_router_tool(ctx, "request_rollback", args)
+
+    deps = PydanticAgentDeps(project_id=project_id, safe_mode=safe_mode, router=router)
+    return agent, deps
+
+
+def _build_pydantic_ai_run(
+    project_id: str,
+    prompt: str,
+    dataset_id: str | None,
+    safe_mode: bool,
+) -> tuple[AgentRunRead, str]:
+    agent, deps = _build_pydantic_agent(project_id, safe_mode)
+    enriched_prompt = prompt
+    if dataset_id:
+        enriched_prompt += f"\n\nDataset ID: {dataset_id}"
+    result = agent.run_sync(enriched_prompt, deps=deps)
+
+    tool_calls: list[tuple[str, dict[str, Any], str | None]] = []
+    outputs: dict[str, Any] = {}
+    for message in result.all_messages():
+        for part in message.parts:
+            if isinstance(part, ToolCallPart):
+                tool_calls.append((part.tool_name, dict(part.args or {}), part.tool_call_id))
+            elif isinstance(part, ToolReturnPart):
+                if part.tool_call_id:
+                    outputs[part.tool_call_id] = part.content
+
+    steps: list[PlanStep] = []
+    log_entries: list[dict[str, Any]] = []
+    for tool_name, args, call_id in tool_calls:
+        step_id = uuid4().hex
+        output = outputs.get(call_id) if call_id else None
+        status = StepStatus.APPLIED if output is not None else StepStatus.FAILED
+        steps.append(
+            PlanStep(
+                id=step_id,
+                title=f"Run {tool_name}",
+                description=f"Invoke tool {tool_name}",
+                tool=tool_name,
+                args=args,
+                requires_approval=False,
+                status=status,
+            )
+        )
+        record = ActionRecord(
+            run_id="",
+            step_id=step_id,
+            tool=tool_name,
+            args=args,
+            status=status,
+            output=output if isinstance(output, dict) else {"result": output},
+            error=None if output is not None else "Missing tool return",
+        )
+        log_entries.append(record.model_dump(mode="json"))
+
+    plan = Plan(objective=prompt, steps=steps)
+    status = AgentRunStatus.COMPLETED
+    if any(step.status == StepStatus.FAILED for step in steps):
+        status = AgentRunStatus.FAILED
+
+    agent_run = AgentRun(
+        project_id=project_id,
+        status=status.value,
+        plan=plan.model_dump(mode="json"),
+        log=log_entries,
+    )
+    with get_session() as session:
+        session.add(agent_run)
+        session.commit()
+        session.refresh(agent_run)
+    for entry in log_entries:
+        entry["run_id"] = agent_run.id
+    _write_run_artifacts(project_id, agent_run.id, plan.model_dump(mode="json"), log_entries)
+    plan_payload = _plan_to_payload(plan)
+    response_text = _extract_text_response(result.response)
+    return AgentRunRead(
+        id=agent_run.id,
+        project_id=agent_run.project_id,
+        status=AgentRunStatus(agent_run.status),
+        plan=plan_payload,
+        log=log_entries,
+    ), response_text
+
+
 def send_chat_message(
     project_id: str,
     content: str,
@@ -1119,42 +1689,47 @@ def send_chat_message(
     auto_run: bool = True,
 ) -> tuple[AgentChatMessage, AgentChatMessage, AgentRunRead | None]:
     user_message = create_chat_message(project_id, "user", content)
-    router, _ = _build_router(project_id)
-    plan_payload = generate_plan(
-        prompt=content,
-        tool_catalog=_tool_catalog(router),
-        dataset_id=dataset_id,
-        safe_mode=safe_mode,
-    )
-    plan = AgentPlanCreate(
-        objective=plan_payload.objective,
-        steps=[
-            AgentPlanStepCreate(
-                title=step.title,
-                description=step.description,
-                tool=step.tool,
-                args=step.args,
-                requires_approval=step.requires_approval,
-            )
-            for step in plan_payload.steps
-        ],
-    )
-    plan = _apply_safe_mode(plan, router, safe_mode)
+    backend = os.getenv("AGENT_BACKEND", "legacy").lower()
     run: AgentRunRead | None = None
     assistant_content = "Saved your note."
 
-    if plan.steps:
-        if auto_run:
-            run = run_plan(project_id, plan, approvals=None)
-            step_list = ", ".join(step.tool or "step" for step in run.plan.steps)
-            assistant_content = (
-                f"Created agent run {run.id} with {len(run.plan.steps)} step(s): {step_list}."
-            )
-        else:
-            step_list = ", ".join(step.tool or "step" for step in plan.steps)
-            assistant_content = (
-                f"Prepared a plan with {len(plan.steps)} step(s): {step_list}."
-            )
+    if backend == "pydantic_ai" and auto_run:
+        run, response_text = _build_pydantic_ai_run(project_id, content, dataset_id, safe_mode)
+        assistant_content = response_text or f"Created agent run {run.id} with {len(run.plan.steps)} step(s)."
+    else:
+        router, _ = _build_router(project_id)
+        plan_payload = generate_plan(
+            prompt=content,
+            tool_catalog=_tool_catalog(router),
+            dataset_id=dataset_id,
+            safe_mode=safe_mode,
+        )
+        plan = AgentPlanCreate(
+            objective=plan_payload.objective,
+            steps=[
+                AgentPlanStepCreate(
+                    title=step.title,
+                    description=step.description,
+                    tool=step.tool,
+                    args=step.args,
+                    requires_approval=step.requires_approval,
+                )
+                for step in plan_payload.steps
+            ],
+        )
+        plan = _apply_safe_mode(plan, router, safe_mode)
+        if plan.steps:
+            if auto_run:
+                run = run_plan(project_id, plan, approvals=None)
+                step_list = ", ".join(step.tool or "step" for step in run.plan.steps)
+                assistant_content = (
+                    f"Created agent run {run.id} with {len(run.plan.steps)} step(s): {step_list}."
+                )
+            else:
+                step_list = ", ".join(step.tool or "step" for step in plan.steps)
+                assistant_content = (
+                    f"Prepared a plan with {len(plan.steps)} step(s): {step_list}."
+                )
 
     assistant_message = create_chat_message(
         project_id,
