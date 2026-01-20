@@ -113,6 +113,7 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     assert "list_project_runs" in tool_names
     assert "list_artifacts" in tool_names
     assert "create_snapshot" in tool_names
+    assert "request_rollback" in tool_names
 
     plan_payload = {
         "objective": "Profile dataset",
@@ -150,3 +151,12 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
 
     snapshots_resp = client.get(f"/projects/{project_id}/agent/snapshots")
     assert snapshots_resp.status_code == 200
+
+    rollback_resp = client.post(
+        f"/projects/{project_id}/agent/rollbacks",
+        json={"note": "test rollback"},
+    )
+    assert rollback_resp.status_code == 201
+
+    rollbacks_resp = client.get(f"/projects/{project_id}/agent/rollbacks")
+    assert rollbacks_resp.status_code == 200

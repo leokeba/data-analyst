@@ -1,6 +1,13 @@
 from fastapi import APIRouter, HTTPException, Response
 
-from app.models.schemas import AgentRunCreate, AgentRunRead, AgentSnapshotRead, AgentToolRead
+from app.models.schemas import (
+    AgentRollbackCreate,
+    AgentRollbackRead,
+    AgentRunCreate,
+    AgentRunRead,
+    AgentSnapshotRead,
+    AgentToolRead,
+)
 from app.services import agent as agent_service
 from app.services import store
 
@@ -60,4 +67,42 @@ def list_agent_snapshots(
             details=snapshot.details,
         )
         for snapshot in snapshots
+    ]
+
+
+@router.post("/rollbacks", response_model=AgentRollbackRead, status_code=201)
+def create_agent_rollback(project_id: str, payload: AgentRollbackCreate) -> AgentRollbackRead:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    rollback = agent_service.create_rollback(project_id, payload.run_id, payload.snapshot_id, payload.note)
+    return AgentRollbackRead(
+        id=rollback.id,
+        project_id=rollback.project_id,
+        run_id=rollback.run_id,
+        snapshot_id=rollback.snapshot_id,
+        status=rollback.status,
+        created_at=rollback.created_at,
+        note=rollback.note,
+    )
+
+
+@router.get("/rollbacks", response_model=list[AgentRollbackRead])
+def list_agent_rollbacks(
+    project_id: str, response: Response, limit: int = 100, offset: int = 0
+) -> list[AgentRollbackRead]:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(agent_service.count_rollbacks(project_id))
+    rollbacks = agent_service.list_rollbacks(project_id, limit=limit, offset=offset)
+    return [
+        AgentRollbackRead(
+            id=rollback.id,
+            project_id=rollback.project_id,
+            run_id=rollback.run_id,
+            snapshot_id=rollback.snapshot_id,
+            status=rollback.status,
+            created_at=rollback.created_at,
+            note=rollback.note,
+        )
+        for rollback in rollbacks
     ]

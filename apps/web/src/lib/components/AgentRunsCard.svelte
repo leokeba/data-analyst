@@ -43,6 +43,7 @@
 	export let snapshots: AgentSnapshot[] = [];
 	export let snapshotsLoading = false;
 	export let snapshotsError = "";
+	export let rollbackError = "";
 	export let snapshotsPageSize = 10;
 	export let snapshotsPageOffset = 0;
 	export let snapshotsHasNext = false;
@@ -76,6 +77,7 @@
 	export let onReplayRun: (run: AgentRun) => void;
 	export let onPrevSnapshotsPage: () => void;
 	export let onNextSnapshotsPage: () => void;
+	export let onRequestRollback: (snapshot: AgentSnapshot) => void;
 
 	$: pageNumber = Math.floor(pageOffset / pageSize) + 1;
 	$: rangeStart = runs.length ? pageOffset + 1 : 0;
@@ -216,9 +218,17 @@
 					{#if snapshot.run_id}
 						<span>Run: {snapshot.run_id}</span>
 					{/if}
+					<div class="card__actions">
+						<button class="secondary" on:click={() => onRequestRollback(snapshot)}>
+							Request rollback
+						</button>
+					</div>
 				</li>
 			{/each}
 		</ul>
+	{/if}
+	{#if rollbackError}
+		<p class="error">{rollbackError}</p>
 	{/if}
 
 	{#if !snapshotsLoading && !snapshotsError && snapshots.length && (snapshotsHasNext || snapshotsPageOffset > 0)}

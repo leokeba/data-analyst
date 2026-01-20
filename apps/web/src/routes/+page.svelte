@@ -169,6 +169,7 @@
 	let agentSnapshots: AgentSnapshot[] = [];
 	let agentSnapshotsLoading = false;
 	let agentSnapshotsError = '';
+	let agentRollbackError = '';
 	let agentSnapshotsLimit = 10;
 	let agentSnapshotsOffset = 0;
 	let agentSnapshotsHasNext = false;
@@ -548,6 +549,29 @@
 		loadAgentSnapshots();
 	}
 
+	async function requestAgentRollback(snapshot: AgentSnapshot) {
+		if (!selectedProjectId) return;
+		if (!confirm('Request rollback for this snapshot?')) return;
+		agentRollbackError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/rollbacks`,
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						snapshot_id: snapshot.id,
+						run_id: snapshot.run_id ?? null,
+						note: 'requested from UI'
+					})
+				}
+			);
+			if (!res.ok) throw new Error('Failed to request rollback');
+		} catch (e) {
+			agentRollbackError = (e as Error).message;
+		}
+	}
+
 	async function replayAgentRun(run: AgentRun) {
 		if (!selectedProjectId) return;
 		if (!confirm('Replay this agent plan?')) return;
@@ -918,6 +942,7 @@
 				snapshots={agentSnapshots}
 				snapshotsLoading={agentSnapshotsLoading}
 				snapshotsError={agentSnapshotsError}
+				rollbackError={agentRollbackError}
 				snapshotsPageSize={agentSnapshotsLimit}
 				snapshotsPageOffset={agentSnapshotsOffset}
 				snapshotsHasNext={agentSnapshotsHasNext}
@@ -936,6 +961,7 @@
 				onReplayRun={replayAgentRun}
 				onPrevSnapshotsPage={prevAgentSnapshotsPage}
 				onNextSnapshotsPage={nextAgentSnapshotsPage}
+				onRequestRollback={requestAgentRollback}
 			/>
 		{:else}
 			<div class="welcome">

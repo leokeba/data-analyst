@@ -4,12 +4,14 @@
 - Phase 1: Core orchestration — **in progress**
 	- ✅ Agent runtime skeleton (plan/steps, tool router, journal, snapshots)
 	- ✅ Agent API endpoints: create run, get run, list runs, list tools
-	- ✅ Initial agent tools: create run, preview dataset, list datasets, list project runs, list artifacts, create snapshot
+	- ✅ Initial agent tools: create run, preview dataset, list datasets, list project runs, list artifacts, create snapshot, request rollback
 	- ✅ Agent runs UI: tool inventory, run list, per-step status, completion %, replay action
 	- ✅ Replay flow captures approver name for required-approval steps
 	- ✅ Snapshot listing endpoint (metadata only)
 	- ✅ Snapshot records persisted in DB schema
 	- ✅ Snapshot list surfaced in agent UI (read-only)
+	- ✅ Rollback request endpoint (record-only)
+	- ✅ Rollback request action wired in UI (record-only)
 	- ⏳ Persisted run logs wired to UI (not started)
 	- ⏳ Tool approval UI + apply/rollback controls (not started)
 	- ⏳ Snapshot/rollback implementation beyond metadata (not started)

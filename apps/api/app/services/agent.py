@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from app.models.db import AgentRun, AgentSnapshot
+from app.models.db import AgentRollback, AgentRun, AgentSnapshot
 from sqlalchemy import func
 from sqlmodel import select
 from app.models.schemas import (
@@ -152,6 +152,44 @@ def _tool_create_snapshot_factory(project_id: str):
     )
 
 
+def _tool_request_rollback_factory(project_id: str):
+    def _handler(args: dict[str, Any]) -> ToolResult:
+        run_id = args.get("run_id")
+        snapshot_id = args.get("snapshot_id")
+        note = args.get("note") if isinstance(args.get("note"), str) else None
+        rollback = AgentRollback(
+            project_id=project_id,
+            run_id=run_id,
+            snapshot_id=snapshot_id,
+            status="requested",
+            note=note,
+        )
+        with get_session() as session:
+            session.add(rollback)
+            session.commit()
+            session.refresh(rollback)
+        return ToolResult(
+            output={
+                "rollback": {
+                    "id": rollback.id,
+                    "project_id": rollback.project_id,
+                    "run_id": rollback.run_id,
+                    "snapshot_id": rollback.snapshot_id,
+                    "status": rollback.status,
+                    "created_at": rollback.created_at.isoformat(),
+                    "note": rollback.note,
+                }
+            }
+        )
+
+    return ToolDefinition(
+        name="request_rollback",
+        description="Request a rollback for a snapshot or run.",
+        handler=_handler,
+        destructive=False,
+    )
+
+
 def _build_plan(payload: AgentPlanCreate) -> Plan:
     steps: list[PlanStep] = []
     for step in payload.steps:
@@ -209,6 +247,7 @@ def _build_router(project_id: str) -> tuple[ToolRouter, AgentPolicy]:
     router.register(_tool_list_project_runs_factory(project_id))
     router.register(_tool_list_artifacts_factory(project_id))
     router.register(_tool_create_snapshot_factory(project_id))
+    router.register(_tool_request_rollback_factory(project_id))
     return router, policy
 
 
@@ -318,5 +357,40 @@ def count_snapshots(project_id: str) -> int:
     with get_session() as session:
         total = session.exec(
             select(func.count()).select_from(AgentSnapshot).where(AgentSnapshot.project_id == project_id)
+        ).one()
+    return int(total)
+
+
+def create_rollback(project_id: str, run_id: str | None, snapshot_id: str | None, note: str | None) -> AgentRollback:
+    rollback = AgentRollback(
+        project_id=project_id,
+        run_id=run_id,
+        snapshot_id=snapshot_id,
+        status="requested",
+        note=note,
+    )
+    with get_session() as session:
+        session.add(rollback)
+        session.commit()
+        session.refresh(rollback)
+    return rollback
+
+
+def list_rollbacks(project_id: str, limit: int = 100, offset: int = 0) -> list[AgentRollback]:
+    with get_session() as session:
+        rollbacks = session.exec(
+            select(AgentRollback)
+            .where(AgentRollback.project_id == project_id)
+            .order_by(AgentRollback.created_at)
+            .offset(offset)
+            .limit(limit)
+        ).all()
+    return rollbacks
+
+
+def count_rollbacks(project_id: str) -> int:
+    with get_session() as session:
+        total = session.exec(
+            select(func.count()).select_from(AgentRollback).where(AgentRollback.project_id == project_id)
         ).one()
     return int(total)

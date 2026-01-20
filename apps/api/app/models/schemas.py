@@ -113,6 +113,22 @@ class AgentSnapshotRead(BaseModel):
     details: dict | None = None
 
 
+class AgentRollbackCreate(BaseModel):
+    run_id: str | None = None
+    snapshot_id: str | None = None
+    note: str | None = None
+
+
+class AgentRollbackRead(BaseModel):
+    id: str
+    project_id: str
+    run_id: str | None = None
+    snapshot_id: str | None = None
+    status: str
+    created_at: datetime
+    note: str | None = None
+
+
 class AgentToolRead(BaseModel):
     name: str
     description: str
