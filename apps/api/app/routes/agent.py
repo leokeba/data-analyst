@@ -6,6 +6,9 @@ from fastapi.responses import FileResponse
 from app.models.schemas import (
     AgentApproval,
     AgentArtifactRead,
+    AgentChatMessageRead,
+    AgentChatSend,
+    AgentChatSendResponse,
     AgentSkillCreate,
     AgentSkillRead,
     AgentSkillUpdate,
@@ -84,6 +87,64 @@ def list_agent_tools(project_id: str) -> list[AgentToolRead]:
     if not store.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     return agent_service.list_tools(project_id)
+
+
+@router.get("/chat/messages", response_model=list[AgentChatMessageRead])
+def list_agent_chat_messages(
+    project_id: str, response: Response, limit: int = 100, offset: int = 0
+) -> list[AgentChatMessageRead]:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    response.headers["X-Total-Count"] = str(agent_service.count_chat_messages(project_id))
+    messages = agent_service.list_chat_messages(project_id, limit=limit, offset=offset)
+    return [
+        AgentChatMessageRead(
+            id=message.id,
+            project_id=message.project_id,
+            role=message.role,
+            content=message.content,
+            created_at=message.created_at,
+            run_id=message.run_id,
+            attachments=message.attachments,
+        )
+        for message in messages
+    ]
+
+
+@router.post("/chat", response_model=AgentChatSendResponse, status_code=201)
+def send_agent_chat_message(project_id: str, payload: AgentChatSend) -> AgentChatSendResponse:
+    if not store.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    user_message, assistant_message, run = agent_service.send_chat_message(
+        project_id,
+        payload.content,
+        payload.dataset_id,
+        payload.safe_mode,
+        payload.auto_run,
+    )
+    return AgentChatSendResponse(
+        messages=[
+            AgentChatMessageRead(
+                id=user_message.id,
+                project_id=user_message.project_id,
+                role=user_message.role,
+                content=user_message.content,
+                created_at=user_message.created_at,
+                run_id=user_message.run_id,
+                attachments=user_message.attachments,
+            ),
+            AgentChatMessageRead(
+                id=assistant_message.id,
+                project_id=assistant_message.project_id,
+                role=assistant_message.role,
+                content=assistant_message.content,
+                created_at=assistant_message.created_at,
+                run_id=assistant_message.run_id,
+                attachments=assistant_message.attachments,
+            ),
+        ],
+        run=run,
+    )
 
 
 @router.get("/artifacts", response_model=list[AgentArtifactRead])

@@ -18,6 +18,7 @@
 	export let input = '';
 	export let error = '';
 	export let loadingPreview = false;
+	export let sending = false;
 	export let safeMode = true;
 	export let onToggleSafeMode: () => void;
 	export let onSend: () => void;
@@ -86,7 +87,7 @@
 
 	<div class="chat-input">
 		<textarea bind:value={input} rows="4" placeholder="Type a note or instruction"></textarea>
-		<button on:click={onSend} disabled={!input.trim()}>Send</button>
+		<button on:click={onSend} disabled={sending || !input.trim()}>Send</button>
 	</div>
 </aside>
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.models.db import (
+    AgentChatMessage,
     AgentArtifact,
     AgentRollback,
     AgentRun,

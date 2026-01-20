@@ -130,6 +130,7 @@
 		role: 'user' | 'assistant' | 'system';
 		content: string;
 		created_at: string;
+		run_id?: string | null;
 		attachments?: ChatAttachment[];
 	};
 
@@ -261,6 +262,7 @@
 	let chatInput = '';
 	let chatError = '';
 	let chatLoadingPreview = false;
+	let chatSending = false;
 	let agentRunPoller: ReturnType<typeof setInterval> | null = null;
 
 	// Derived
@@ -421,9 +423,24 @@
 			loadAgentArtifacts(),
 			loadAgentSnapshots(),
 			loadAgentRollbacks(),
-			loadAgentSkills()
+			loadAgentSkills(),
+			loadAgentChatMessages()
 		]);
 		startAgentPolling();
+	}
+
+	async function loadAgentChatMessages() {
+		if (!selectedProjectId) return;
+		chatError = '';
+		try {
+			const res = await fetch(
+				`${apiBase}/projects/${selectedProjectId}/agent/chat/messages?limit=200&offset=0`
+			);
+			if (!res.ok) throw new Error('Failed to fetch agent chat');
+			chatMessages = await res.json();
+		} catch (e) {
+			chatError = (e as Error).message;
+		}
 	}
 
 	// Datasets
@@ -1024,15 +1041,37 @@
 	}
 
 	function sendChatMessage() {
-		if (!chatInput.trim()) return;
-		const message: ChatMessage = {
-			id: crypto.randomUUID(),
-			role: 'user',
-			content: chatInput.trim(),
-			created_at: new Date().toISOString(),
-		};
-		appendChatMessage(message);
+		if (!chatInput.trim() || !selectedProjectId || chatSending) return;
+		const content = chatInput.trim();
 		chatInput = '';
+		chatError = '';
+		chatSending = true;
+		fetch(`${apiBase}/projects/${selectedProjectId}/agent/chat`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				content,
+				dataset_id: selectedDatasetId || null,
+				safe_mode: agentSafeMode,
+				auto_run: true
+			})
+		})
+			.then(async (res) => {
+				if (!res.ok) throw new Error('Failed to send agent chat message');
+				return res.json();
+			})
+			.then(async (payload) => {
+				chatMessages = [...chatMessages, ...payload.messages];
+				if (payload.run) {
+					await Promise.all([loadAgentRuns(), loadAgentArtifacts()]);
+				}
+			})
+			.catch((e) => {
+				chatError = (e as Error).message;
+			})
+			.finally(() => {
+				chatSending = false;
+			});
 	}
 
 	async function attachDatasetPreviewToChat() {
@@ -1343,6 +1382,7 @@
 				bind:input={chatInput}
 				error={chatError}
 				loadingPreview={chatLoadingPreview}
+				sending={chatSending}
 				safeMode={agentSafeMode}
 				onToggleSafeMode={toggleAgentSafeMode}
 				onSend={sendChatMessage}

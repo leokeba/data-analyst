@@ -261,6 +261,23 @@ def test_agent_run_executes_plan(client, tmp_path: Path):
     )
     assert update_skill_resp.status_code == 200
 
+    chat_send_resp = client.post(
+        f"/projects/{project_id}/agent/chat",
+        json={
+            "content": "List datasets and preview",
+            "dataset_id": dataset["id"],
+            "safe_mode": True,
+            "auto_run": True,
+        },
+    )
+    assert chat_send_resp.status_code == 201
+    chat_payload = chat_send_resp.json()
+    assert len(chat_payload["messages"]) == 2
+
+    chat_list_resp = client.get(f"/projects/{project_id}/agent/chat/messages")
+    assert chat_list_resp.status_code == 200
+    assert chat_list_resp.headers.get("x-total-count")
+
     skill_plan_resp = client.get(
         f"/projects/{project_id}/agent/skills/{skill_id}/plan",
     )

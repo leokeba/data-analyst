@@ -132,6 +132,35 @@ class AgentArtifactRead(BaseModel):
     created_at: datetime
 
 
+class AgentChatAttachment(BaseModel):
+    type: str
+    title: str
+    content: str
+    mime_type: str | None = None
+
+
+class AgentChatMessageRead(BaseModel):
+    id: str
+    project_id: str
+    role: str
+    content: str
+    created_at: datetime
+    run_id: str | None = None
+    attachments: list[AgentChatAttachment] | None = None
+
+
+class AgentChatSend(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+    dataset_id: str | None = None
+    auto_run: bool = True
+    safe_mode: bool = True
+
+
+class AgentChatSendResponse(BaseModel):
+    messages: list[AgentChatMessageRead]
+    run: AgentRunRead | None = None
+
+
 class AgentRollbackCreate(BaseModel):
     run_id: str | None = None
     snapshot_id: str | None = None

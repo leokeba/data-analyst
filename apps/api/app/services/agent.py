@@ -7,7 +7,14 @@ import shutil
 from typing import Any
 from uuid import uuid4
 
-from app.models.db import AgentArtifact, AgentRollback, AgentRun, AgentSkill, AgentSnapshot
+from app.models.db import (
+    AgentArtifact,
+    AgentChatMessage,
+    AgentRollback,
+    AgentRun,
+    AgentSkill,
+    AgentSnapshot,
+)
 from sqlalchemy import func
 from sqlmodel import select
 from app.models.schemas import (
@@ -217,6 +224,76 @@ def _plan_to_payload(plan: Plan) -> AgentPlanCreate:
             for step in plan.steps
         ],
     )
+
+
+def _chat_prompt_to_plan(
+    prompt: str,
+    dataset_id: str | None,
+    router: ToolRouter,
+    safe_mode: bool,
+) -> AgentPlanCreate:
+    prompt_lower = prompt.lower()
+    available = {tool.name: tool for tool in router.list_tools()}
+    used_tools: set[str] = set()
+    steps: list[AgentPlanStepCreate] = []
+
+    def add_step(tool_name: str, title: str, description: str, args: dict[str, Any] | None = None) -> None:
+        if tool_name not in available or tool_name in used_tools:
+            return
+        tool = available[tool_name]
+        requires_approval = safe_mode and tool.destructive
+        steps.append(
+            AgentPlanStepCreate(
+                title=title,
+                description=description,
+                tool=tool_name,
+                args=args or {},
+                requires_approval=requires_approval,
+            )
+        )
+        used_tools.add(tool_name)
+
+    if "list datasets" in prompt_lower or ("datasets" in prompt_lower and "list" in prompt_lower):
+        add_step("list_datasets", "List datasets", "List datasets in the project")
+
+    if "preview" in prompt_lower and dataset_id:
+        add_step(
+            "preview_dataset",
+            "Preview dataset",
+            "Preview a dataset sample",
+            {"dataset_id": dataset_id},
+        )
+
+    if "list runs" in prompt_lower or ("runs" in prompt_lower and "list" in prompt_lower):
+        add_step("list_project_runs", "List runs", "List data runs for the project")
+
+    if "artifacts" in prompt_lower and ("list" in prompt_lower or "show" in prompt_lower):
+        add_step("list_artifacts", "List artifacts", "List project artifacts")
+
+    run_type = None
+    if "ingest" in prompt_lower:
+        run_type = "ingest"
+    elif "profile" in prompt_lower:
+        run_type = "profile"
+    elif "analysis" in prompt_lower or "analyze" in prompt_lower:
+        run_type = "analysis"
+    elif "report" in prompt_lower:
+        run_type = "report"
+
+    if run_type and dataset_id:
+        add_step(
+            "create_run",
+            f"Create {run_type} run",
+            f"Create a {run_type} run for the dataset",
+            {"dataset_id": dataset_id, "type": run_type},
+        )
+        if safe_mode:
+            steps[-1].requires_approval = True
+
+    objective = "Chat request"
+    if prompt.strip():
+        objective = prompt.strip()[:120]
+    return AgentPlanCreate(objective=objective, steps=steps)
 
 
 def _approve_map(approvals: dict[str, AgentApproval] | None) -> dict[str, Approval]:
@@ -780,3 +857,81 @@ def delete_skill(project_id: str, skill_id: str) -> bool:
         session.delete(skill)
         session.commit()
     return True
+
+
+def create_chat_message(
+    project_id: str,
+    role: str,
+    content: str,
+    attachments: list[dict[str, Any]] | None = None,
+    run_id: str | None = None,
+) -> AgentChatMessage:
+    message = AgentChatMessage(
+        project_id=project_id,
+        role=role,
+        content=content,
+        attachments=attachments,
+        run_id=run_id,
+    )
+    with get_session() as session:
+        session.add(message)
+        session.commit()
+        session.refresh(message)
+    return message
+
+
+def list_chat_messages(project_id: str, limit: int = 100, offset: int = 0) -> list[AgentChatMessage]:
+    with get_session() as session:
+        messages = session.exec(
+            select(AgentChatMessage)
+            .where(AgentChatMessage.project_id == project_id)
+            .order_by(AgentChatMessage.created_at)
+            .offset(offset)
+            .limit(limit)
+        ).all()
+    return messages
+
+
+def count_chat_messages(project_id: str) -> int:
+    with get_session() as session:
+        total = session.exec(
+            select(func.count()).select_from(AgentChatMessage).where(
+                AgentChatMessage.project_id == project_id
+            )
+        ).one()
+    return int(total)
+
+
+def send_chat_message(
+    project_id: str,
+    content: str,
+    dataset_id: str | None,
+    safe_mode: bool = True,
+    auto_run: bool = True,
+) -> tuple[AgentChatMessage, AgentChatMessage, AgentRunRead | None]:
+    user_message = create_chat_message(project_id, "user", content)
+    router, _ = _build_router(project_id)
+    plan = _chat_prompt_to_plan(content, dataset_id, router, safe_mode)
+    run: AgentRunRead | None = None
+    assistant_content = "Saved your note. Try: list datasets, preview dataset, or run profile."
+
+    if plan.steps:
+        if auto_run:
+            run = run_plan(project_id, plan, approvals=None)
+            step_list = ", ".join(step.tool or "step" for step in run.plan.steps)
+            assistant_content = (
+                f"Created agent run {run.id} with {len(run.plan.steps)} step(s): {step_list}."
+            )
+        else:
+            step_list = ", ".join(step.tool or "step" for step in plan.steps)
+            assistant_content = (
+                f"Prepared a plan with {len(plan.steps)} step(s): {step_list}."
+            )
+
+    assistant_message = create_chat_message(
+        project_id,
+        "assistant",
+        assistant_content,
+        run_id=run.id if run else None,
+    )
+    return user_message, assistant_message, run

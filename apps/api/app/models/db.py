@@ -99,3 +99,13 @@ class AgentSkill(SQLModel, table=True):
     enabled: bool = True
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
+
+
+class AgentChatMessage(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    project_id: str = Field(index=True)
+    role: str
+    content: str
+    created_at: datetime = Field(default_factory=_now)
+    run_id: Optional[str] = Field(default=None, index=True)
+    attachments: Optional[list[dict]] = Field(default=None, sa_column=Column(JSON))
