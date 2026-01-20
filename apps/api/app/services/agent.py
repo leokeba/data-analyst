@@ -850,6 +850,32 @@ def _write_run_artifacts(project_id: str, run_id: str, plan: dict[str, Any], log
     )
 
 
+def _summarize_run_log(log: list[dict[str, Any]], max_items: int = 6) -> list[dict[str, Any]]:
+    summary: list[dict[str, Any]] = []
+    for entry in log[-max_items:]:
+        output = entry.get("output") or {}
+        summary.append(
+            {
+                "tool": entry.get("tool"),
+                "status": entry.get("status"),
+                "error": entry.get("error"),
+                "stdout": output.get("stdout"),
+                "stderr": output.get("stderr"),
+                "path": output.get("path"),
+            }
+        )
+    return summary
+
+
+def _run_has_failures(run: AgentRunRead) -> bool:
+    if run.status == AgentRunStatus.FAILED:
+        return True
+    for entry in run.log:
+        if entry.get("status") == StepStatus.FAILED.value:
+            return True
+    return False
+
+
 def list_tools(project_id: str) -> list[AgentToolRead]:
     router, _ = _build_router(project_id)
     return [
@@ -1353,37 +1379,80 @@ def send_chat_message(
 ) -> tuple[AgentChatMessage, AgentChatMessage, AgentRunRead | None]:
     user_message = create_chat_message(project_id, "user", content)
     router, _ = _build_router(project_id)
-    plan_payload = generate_plan(
-        prompt=content,
-        tool_catalog=_tool_catalog(router),
-        dataset_id=dataset_id,
-        safe_mode=safe_mode,
-    )
-    plan = AgentPlanCreate(
-        objective=plan_payload.objective,
-        steps=[
-            AgentPlanStepCreate(
-                title=step.title,
-                description=step.description,
-                tool=step.tool,
-                args=step.args,
-                requires_approval=step.requires_approval,
-            )
-            for step in plan_payload.steps
-        ],
-    )
-    plan = _apply_safe_mode(plan, router, safe_mode)
+    tool_catalog = _tool_catalog(router)
+    plan: AgentPlanCreate | None = None
     run: AgentRunRead | None = None
     assistant_content = "Saved your note."
 
-    if plan.steps:
-        if auto_run:
+    if auto_run:
+        context: dict[str, Any] = {}
+        max_iters = 3
+        for iteration in range(1, max_iters + 1):
+            plan_payload = generate_plan(
+                prompt=content,
+                tool_catalog=tool_catalog,
+                dataset_id=dataset_id,
+                safe_mode=safe_mode,
+                context=context,
+            )
+            plan = AgentPlanCreate(
+                objective=plan_payload.objective,
+                steps=[
+                    AgentPlanStepCreate(
+                        title=step.title,
+                        description=step.description,
+                        tool=step.tool,
+                        args=step.args,
+                        requires_approval=step.requires_approval,
+                    )
+                    for step in plan_payload.steps
+                ],
+            )
+            plan = _apply_safe_mode(plan, router, safe_mode)
+            if not plan.steps:
+                break
             run = run_plan(project_id, plan, approvals=None)
+            if not _run_has_failures(run):
+                break
+            context = {
+                "iteration": iteration,
+                "last_plan": plan.model_dump(),
+                "last_run": {
+                    "id": run.id,
+                    "status": run.status.value,
+                    "log_summary": _summarize_run_log(run.log),
+                },
+                "note": "Previous run had failures. Revise the plan to address them.",
+            }
+
+        if run and run.plan.steps:
             step_list = ", ".join(step.tool or "step" for step in run.plan.steps)
             assistant_content = (
                 f"Created agent run {run.id} with {len(run.plan.steps)} step(s): {step_list}."
             )
-        else:
+    else:
+        plan_payload = generate_plan(
+            prompt=content,
+            tool_catalog=tool_catalog,
+            dataset_id=dataset_id,
+            safe_mode=safe_mode,
+            context=None,
+        )
+        plan = AgentPlanCreate(
+            objective=plan_payload.objective,
+            steps=[
+                AgentPlanStepCreate(
+                    title=step.title,
+                    description=step.description,
+                    tool=step.tool,
+                    args=step.args,
+                    requires_approval=step.requires_approval,
+                )
+                for step in plan_payload.steps
+            ],
+        )
+        plan = _apply_safe_mode(plan, router, safe_mode)
+        if plan.steps:
             step_list = ", ".join(step.tool or "step" for step in plan.steps)
             assistant_content = (
                 f"Prepared a plan with {len(plan.steps)} step(s): {step_list}."

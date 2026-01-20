@@ -264,7 +264,7 @@ def test_agent_run_executes_plan(client, tmp_path: Path, monkeypatch):
     )
     assert update_skill_resp.status_code == 200
 
-    def _fake_generate_plan(prompt, tool_catalog, dataset_id, safe_mode, max_steps=8):
+    def _fake_generate_plan(prompt, tool_catalog, dataset_id, safe_mode, context=None, max_steps=8):
         return llm_module.PlanPayload(
             objective="Chat test",
             steps=[

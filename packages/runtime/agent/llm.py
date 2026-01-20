@@ -43,11 +43,13 @@ def generate_plan(
     tool_catalog: list[dict[str, Any]],
     dataset_id: str | None,
     safe_mode: bool,
+    context: dict[str, Any] | None = None,
     max_steps: int = 8,
 ) -> PlanPayload:
     system = (
         "You are the Planner. Produce a JSON plan with objective and steps. "
         "Use only tools from the catalog. Keep steps minimal and deterministic. "
+        "If context is provided, incorporate tool outputs and failures to refine the next plan. "
         "Return JSON only with keys: objective, steps[].title, steps[].description, "
         "steps[].tool, steps[].args, steps[].requires_approval."
     )
@@ -57,6 +59,7 @@ def generate_plan(
         "safe_mode": safe_mode,
         "max_steps": max_steps,
         "tools": tool_catalog,
+        "context": context or {},
     }
     client = _client()
     response = client.responses.create(
