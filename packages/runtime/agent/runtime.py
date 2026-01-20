@@ -43,7 +43,8 @@ class AgentRuntime:
             step.status = StepStatus.SKIPPED
             return None
         try:
-            result = self._tools.call(step.tool, step.args, approved=approval is not None)
+            approved = approval is not None or not step.requires_approval
+            result = self._tools.call(step.tool, step.args, approved=approved)
             self._journal.apply(record, result)
             step.status = StepStatus.APPLIED
             return result

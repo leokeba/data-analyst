@@ -127,7 +127,7 @@ def main() -> int:
         chat_prompt = (
             "You are operating inside a project workspace. "
             "Return a plan that uses ONLY these tools: list_dir, write_file, read_file, run_python. "
-            "Steps: (1) use list_dir on the project workspace root to confirm structure; "
+            f"Steps: (1) use list_dir with path set exactly to {workspace_path} to confirm structure; "
             f"(2) use write_file to create a note at {note_path} with content 'autonomy ok'; "
             f"(3) use read_file to read back {note_path}; "
             f"(4) use write_file to create a Python script at {script_path} that prints 'autonomy ok' "
