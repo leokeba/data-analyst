@@ -110,23 +110,6 @@ def _send_agent_chat(
     )
 
 
-def _send_chat_with_retry(
-    api_base: str,
-    project_id: str,
-    prompts: list[str],
-    timeout: int,
-) -> dict[str, Any]:
-    last_error: Exception | None = None
-    for prompt in prompts:
-        try:
-            return _send_agent_chat(api_base, project_id, prompt, safe_mode=False, auto_run=True, timeout=timeout)
-        except Exception as exc:  # noqa: BLE001 - try next prompt
-            last_error = exc
-    if last_error:
-        raise last_error
-    raise RuntimeError("No prompts provided")
-
-
 def _extract_stdout(run: dict[str, Any]) -> str:
     stdout = ""
     for entry in run.get("log") or []:
@@ -185,32 +168,12 @@ def main() -> int:
 
         _log_section("Chat prompt")
         print(chat_prompt)
-        print("\n---\n")
-        chat_prompt_strict = (
-            "Return a JSON plan with keys: objective and steps. "
-            "Each steps[] item MUST include title, description, tool, args, requires_approval. "
-            "Use ONLY tools: list_dir, write_file, append_file, read_file, run_python. "
-            "Set requires_approval=false for every step. "
-            f"Step 1: list_dir path={workspace_path}. "
-            f"Step 2: write_file generator script at {generator_path} to write deterministic CSV to {dataset_path} "
-            "with 200 rows (columns id, amount, category, region, day). random.seed(42). "
-            "Categories: hardware, software, services. Regions: north, south, east, west. "
-            "Amounts between 10 and 500. Days 1-30. "
-            "Step 3: run_python the generator script. "
-            f"Step 4: read_file first 6 lines of {dataset_path}. "
-            f"Step 5: append_file line 'autonomy-hard ok' to {note_path}. "
-            f"Step 6: write_file analysis script at {analysis_path} that writes markdown report to {report_path} "
-            "and prints it to stdout with sections: # Hard Autonomy Report, ## Summary, ## Missing values, "
-            "## Top categories, ## Region totals, ## Sample rows. "
-            "Compute row count, column count, missing values per column, top 3 categories, total amount per region. "
-            "Step 7: run_python the analysis script."
-        )
-
-        print(chat_prompt_strict)
-        chat_response = _send_chat_with_retry(
+        chat_response = _send_agent_chat(
             api_base,
             project_id,
-            [chat_prompt, chat_prompt_strict],
+            chat_prompt,
+            safe_mode=False,
+            auto_run=True,
             timeout=args.timeout,
         )
         _log_section("Chat response")

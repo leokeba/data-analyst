@@ -62,13 +62,59 @@ def generate_plan(
         "context": context or {},
     }
     client = _client()
-    response = client.responses.create(
-        model=_model_name(),
-        input=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": json.dumps(user_payload)},
-        ],
-    )
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "agent_plan",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "objective": {"type": "string"},
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "title": {"type": "string"},
+                                "description": {"type": "string"},
+                                "tool": {"type": ["string", "null"]},
+                                "args": {"type": "object"},
+                                "requires_approval": {"type": "boolean"},
+                            },
+                            "required": [
+                                "title",
+                                "description",
+                                "tool",
+                                "args",
+                                "requires_approval",
+                            ],
+                        },
+                    },
+                },
+                "required": ["objective", "steps"],
+            },
+        },
+    }
+    try:
+        response = client.responses.create(
+            model=_model_name(),
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(user_payload)},
+            ],
+            response_format=response_format,
+        )
+    except Exception:
+        response = client.responses.create(
+            model=_model_name(),
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(user_payload)},
+            ],
+        )
     content = getattr(response, "output_text", None) or ""
     if not content:
         output = getattr(response, "output", []) or []
