@@ -495,10 +495,12 @@
 		if (!confirm('Replay this agent plan?')) return;
 		agentRunsActionError = '';
 		try {
+			const approvedBy = prompt('Approved by', 'ui');
+			if (!approvedBy) return;
 			const approvals: Record<string, { approved_by: string; note?: string }> = {};
 			for (const step of run.plan.steps) {
 				if (step.requires_approval && step.id) {
-					approvals[step.id] = { approved_by: 'ui', note: 'replay' };
+					approvals[step.id] = { approved_by: approvedBy, note: 'replay' };
 				}
 			}
 			const res = await fetch(

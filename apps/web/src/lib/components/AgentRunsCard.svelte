@@ -135,6 +135,9 @@
 									<li>
 										<strong>{step.title}</strong>
 										<span>Tool: {step.tool ?? "—"}</span>
+										{#if step.requires_approval}
+											<span>Approval required</span>
+										{/if}
 										<span>Status: {stepStatus(run, step.id)}</span>
 										{#if entry?.approvals?.length}
 											<span>

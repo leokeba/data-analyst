@@ -6,6 +6,7 @@
 	- ✅ Agent API endpoints: create run, get run, list runs, list tools
 	- ✅ Initial agent tools: create run, preview dataset, list datasets, list project runs, list artifacts
 	- ✅ Agent runs UI: tool inventory, run list, per-step status, completion %, replay action
+	- ✅ Replay flow captures approver name for required-approval steps
 	- ⏳ Persisted run logs wired to UI (not started)
 	- ⏳ Tool approval UI + apply/rollback controls (not started)
 	- ⏳ Snapshot/rollback implementation beyond metadata (not started)
