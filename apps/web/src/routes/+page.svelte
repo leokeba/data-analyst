@@ -692,6 +692,13 @@
 		}
 	}
 
+	function clearAgentArtifactPreview() {
+		agentArtifactPreviewId = '';
+		agentArtifactPreviewContent = '';
+		agentArtifactPreviewMimeType = '';
+		agentArtifactPreviewLoading = false;
+	}
+
 	async function loadAgentSnapshots() {
 		if (!selectedProjectId) return;
 		agentSnapshotsLoading = true;
@@ -1421,7 +1428,13 @@
 				onSelectRun={selectAgentRun}
 				onToggleFollowLatest={toggleFollowLatestRun}
 				tools={agentTools}
+				artifacts={agentArtifacts}
 				onPreviewArtifact={previewAgentArtifact}
+				previewArtifactId={agentArtifactPreviewId}
+				previewLoading={agentArtifactPreviewLoading}
+				previewContent={agentArtifactPreviewContent}
+				previewMimeType={agentArtifactPreviewMimeType}
+				onClearPreview={clearAgentArtifactPreview}
 			/>
 
 			<DatasetsCard

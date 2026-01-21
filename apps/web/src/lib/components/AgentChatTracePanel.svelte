@@ -45,6 +45,16 @@
 		}[];
 	};
 
+	type AgentArtifact = {
+		id: string;
+		run_id?: string | null;
+		type: string;
+		path: string;
+		mime_type: string;
+		size: number;
+		created_at: string;
+	};
+
 
 	export let messages: ChatMessage[] = [];
 	export let input = '';
@@ -65,7 +75,13 @@
 	export let onSelectRun: (runId: string) => void;
 	export let onToggleFollowLatest: () => void;
 	export let tools: AgentTool[] = [];
+	export let artifacts: AgentArtifact[] = [];
 	export let onPreviewArtifact: (artifactId: string) => void;
+	export let previewArtifactId = '';
+	export let previewLoading = false;
+	export let previewContent = '';
+	export let previewMimeType = '';
+	export let onClearPreview: () => void;
 
 	$: selectedRun = runs.find((run) => run.id === selectedRunId) || null;
 	$: combinedFeed = (() => {
@@ -122,6 +138,14 @@
 		if (stderr) summary.push(`stderr: ${stderr.slice(0, 180)}`);
 		if (!summary.length) return JSON.stringify(output, null, 2);
 		return summary.join('\n');
+	};
+
+	const resolveArtifactId = (path?: string) => {
+		if (!path) return null;
+		const match = artifacts.find((artifact) =>
+			artifact.path === path || artifact.path.endsWith(`/${path}`)
+		);
+		return match?.id ?? null;
 	};
 </script>
 
@@ -231,17 +255,22 @@
 						{#if item.entry.output}
 							<pre class="preview">{summarizeOutput(item.entry.output)}</pre>
 						{/if}
-						{#if item.entry.artifacts?.length}
-							<div class="card__actions">
-								{#each item.entry.artifacts as artifactId}
-									<button
-										class="secondary"
-										on:click={() => onPreviewArtifact(artifactId)}
-									>
+						{#if item.entry.output?.path}
+							{@const artifactId = resolveArtifactId(item.entry.output.path as string)}
+							{#if artifactId}
+								<div class="card__actions">
+									<button class="secondary" on:click={() => onPreviewArtifact(artifactId)}>
 										Preview artifact
 									</button>
-								{/each}
-							</div>
+								</div>
+								{#if previewArtifactId === artifactId}
+									{#if previewLoading}
+										<p class="muted">Loading preview…</p>
+									{:else}
+										<pre class="preview">{previewContent || 'No preview available.'}</pre>
+									{/if}
+								{/if}
+							{/if}
 						{/if}
 					</div>
 				{/if}
@@ -255,6 +284,21 @@
 			{sending ? 'Sending…' : 'Send'}
 		</button>
 	</div>
+
+	{#if previewArtifactId}
+		<div class="preview-panel">
+			<div class="preview-header">
+				<strong>Preview</strong>
+				<span class="muted">{previewMimeType || 'artifact'}</span>
+				<button class="secondary" on:click={onClearPreview}>Close</button>
+			</div>
+			{#if previewLoading}
+				<p class="muted">Loading preview…</p>
+			{:else}
+				<pre class="preview">{previewContent || 'No preview available.'}</pre>
+			{/if}
+		</div>
+	{/if}
 </aside>
 
 <style>
@@ -275,9 +319,23 @@
 		overflow: auto;
 		padding-right: 4px;
 	}
+	.chat-message {
+		border: 1px solid #f4f4f5;
+		border-radius: 8px;
+		padding: 12px;
+		background: #fafafa;
+	}
+	.chat-message.user {
+		background: #eff6ff;
+		border-color: #93c5fd;
+	}
+	.chat-message.assistant {
+		background: #ecfdf5;
+		border-color: #6ee7b7;
+	}
 	.unified-feed .tool-entry {
-		background: #f8fafc;
-		border-color: #e2e8f0;
+		background: #fdf4ff;
+		border-color: #e9d5ff;
 	}
 	.unified-feed .chat-message.system {
 		background: #fef9c3;
@@ -294,6 +352,18 @@
 		padding: 8px 12px;
 		font-size: 14px;
 		resize: vertical;
+	}
+	.preview-panel {
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		padding: 12px;
+		background: #fff7ed;
+	}
+	.preview-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 8px;
 	}
 	.chat-attachment {
 		margin-top: 8px;
