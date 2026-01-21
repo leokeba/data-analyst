@@ -7,7 +7,7 @@
 	import ReportsCard from '$lib/components/ReportsCard.svelte';
 	import AgentRunsCard from '$lib/components/AgentRunsCard.svelte';
 	import AgentSkillsCard from '$lib/components/AgentSkillsCard.svelte';
-	import AgentChatSidebar from '$lib/components/AgentChatSidebar.svelte';
+	import AgentChatTracePanel from '$lib/components/AgentChatTracePanel.svelte';
 
 	const apiBase = 'http://localhost:8000';
 
@@ -264,6 +264,8 @@
 	let chatLoadingPreview = false;
 	let chatSending = false;
 	let agentRunPoller: ReturnType<typeof setInterval> | null = null;
+	let agentSelectedRunId = '';
+	let agentFollowLatest = true;
 
 	// Derived
 	$: if (selectedDatasetId && datasets.length) {
@@ -306,6 +308,11 @@
 	});
 	
 	$: artifactTypes = Array.from(new Set(selectedRunArtifacts.map(a => a.type)));
+	$: latestAgentRun = agentRuns.length ? agentRuns[agentRuns.length - 1] : null;
+	$: if (agentFollowLatest && latestAgentRun?.id) {
+		agentSelectedRunId = latestAgentRun.id;
+	}
+	$: selectedAgentRun = agentRuns.find((run) => run.id === agentSelectedRunId) || null;
 
 	// Initialization
 	onMount(() => {
@@ -411,6 +418,8 @@
 		agentRunsOffset = 0;
 		agentSnapshotsOffset = 0;
 		agentRollbacksOffset = 0;
+		agentSelectedRunId = '';
+		agentFollowLatest = true;
 		if (agentRunPoller) {
 			clearInterval(agentRunPoller);
 			agentRunPoller = null;
@@ -1040,6 +1049,19 @@
 		chatMessages = [...chatMessages, message];
 	}
 
+	function selectAgentRun(runId: string) {
+		if (!runId) return;
+		agentSelectedRunId = runId;
+		agentFollowLatest = false;
+	}
+
+	function toggleFollowLatestRun() {
+		agentFollowLatest = !agentFollowLatest;
+		if (agentFollowLatest && latestAgentRun?.id) {
+			agentSelectedRunId = latestAgentRun.id;
+		}
+	}
+
 	function sendChatMessage() {
 		if (!chatInput.trim() || !selectedProjectId || chatSending) return;
 		const content = chatInput.trim();
@@ -1063,6 +1085,7 @@
 			.then(async (payload) => {
 				chatMessages = [...chatMessages, ...payload.messages];
 				if (payload.run) {
+					selectAgentRun(payload.run.id);
 					await Promise.all([loadAgentRuns(), loadAgentArtifacts()]);
 				}
 			})
@@ -1376,8 +1399,10 @@
 			onSelect={selectProject}
 		/>
 
+	</div>
+	<div class="main">
 		{#if selectedProjectId}
-			<AgentChatSidebar
+			<AgentChatTracePanel
 				messages={chatMessages}
 				bind:input={chatInput}
 				error={chatError}
@@ -1390,11 +1415,15 @@
 				onAttachRunLog={attachLatestRunLogToChat}
 				onUndo={undoLatestAgentSnapshot}
 				onRedo={redoLatestAgentRun}
+				runs={agentRuns}
+				selectedRunId={agentSelectedRunId}
+				followLatest={agentFollowLatest}
+				onSelectRun={selectAgentRun}
+				onToggleFollowLatest={toggleFollowLatestRun}
+				tools={agentTools}
+				onPreviewArtifact={previewAgentArtifact}
 			/>
-		{/if}
-	</div>
-	<div class="main">
-		{#if selectedProjectId}
+
 			<DatasetsCard
 				{projects}
 				bind:selectedProjectId
