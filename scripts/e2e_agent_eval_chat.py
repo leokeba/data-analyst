@@ -523,12 +523,14 @@ def main() -> int:
             "with row/column counts, missing values by column, and the top 3 categories for each categorical column. "
             "You may use pandas/polars/matplotlib if available, otherwise use the standard library. "
             "Use write_file to save the script under the provided script path, then run_python to execute it. "
+            "The script MUST print the full markdown report to stdout (not just a file path). "
             "Script path: scripts/agent/chat_basic_analysis.py. "
             f"Dataset path: {base_path_rel}."
         )
         basic_prompt_strict = (
             "Return a JSON plan with exactly two steps: write_file then run_python. "
             "Use only tools from the catalog. "
+            "The script MUST print the full markdown report to stdout. "
             "Script path: scripts/agent/chat_basic_analysis.py. "
             f"Dataset path: {base_path_rel}."
         )
@@ -558,6 +560,7 @@ def main() -> int:
             "average order amount by segment and by channel, plus a small sample table. "
             "You may use pandas/polars/matplotlib if available; otherwise standard library is fine. "
             "Use write_file to save the script under the provided script path, then run_python to execute it. "
+            "The script MUST print the full markdown report to stdout (not just a file path). "
             "Script path: scripts/agent/chat_join_analysis.py. "
             f"Customers path: {customers_path_rel}. "
             f"Orders path: {orders_path_rel}."
@@ -565,6 +568,7 @@ def main() -> int:
         join_prompt_strict = (
             "Return a JSON plan with exactly two steps: write_file then run_python. "
             "Use only tools from the catalog. "
+            "The script MUST print the full markdown report to stdout. "
             "Script path: scripts/agent/chat_join_analysis.py. "
             f"Customers path: {customers_path_rel}. "
             f"Orders path: {orders_path_rel}."

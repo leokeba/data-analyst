@@ -279,7 +279,8 @@ def main() -> int:
             "Schema hints: sales.csv columns = date, region, product, units, unit_price, discount_pct. "
             "marketing.csv columns = date, region, spend. support.csv columns = date, region, tickets, severity. "
             "Note: discount_pct is a fraction (0.00-0.10), not a percentage, and severity is text (low/high), not numeric. "
-            "You must run a Python analysis step to compute metrics from the CSVs before writing the report."
+            "You must run a Python analysis step to compute metrics from the CSVs before writing the report. "
+            "Write the report with write_markdown to artifacts/agent/tool-usage-report.md and print the full report to stdout in the run_python step."
         )
 
         _log_section("Chat prompt")

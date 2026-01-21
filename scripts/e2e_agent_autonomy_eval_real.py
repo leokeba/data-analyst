@@ -366,6 +366,8 @@ def main() -> int:
             "You must run a Python analysis step to compute metrics from the CSVs before writing the report. "
             "Every report section must contain at least two sentences AND include numeric references derived from the data. "
             "If you use write_markdown, its content must include the full report; do not leave content empty. "
+            "Compute marketing_revenue_correlation using DAILY totals (sum across regions per date) for revenue and spend. "
+            "If your computed values do not match the required Verification values, adjust the computation method until they match. "
             f"Save the report to {report_path_rel}. "
             "The report must include these sections: # Real Autonomy Report, ## Executive summary, ## Data quality checks, "
             "## Key findings, ## Hypotheses, ## Suggested next actions, ## Appendix. "

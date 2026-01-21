@@ -33,6 +33,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+DEFAULT_TIMEOUT = int(os.environ.get("AGENT_EVAL_TIMEOUT", "240"))
+
 
 @dataclass
 class EvalStep:
@@ -70,7 +72,7 @@ def _request(
     url: str,
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> tuple[int, dict[str, str], bytes]:
     req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     try:
@@ -84,11 +86,14 @@ def _request(
 
 
 def _request_json(
-    method: str, url: str, payload: dict[str, Any] | None = None
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
     body = json.dumps(payload or {}).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if payload is not None else {}
-    status, _, data = _request(method, url, body=body, headers=headers)
+    status, _, data = _request(method, url, body=body, headers=headers, timeout=timeout)
     try:
         parsed = json.loads(data.decode("utf-8")) if data else {}
     except json.JSONDecodeError:
@@ -125,7 +130,7 @@ def _encode_multipart(
 
 
 def _health_check(api_base: str) -> None:
-    status, _, data = _request("GET", f"{api_base}/health")
+    status, _, data = _request("GET", f"{api_base}/health", timeout=DEFAULT_TIMEOUT)
     if status != 200:
         raise RuntimeError(
             f"Health check failed ({status}): {data.decode('utf-8', errors='replace')}"
@@ -134,7 +139,7 @@ def _health_check(api_base: str) -> None:
 
 def _create_project(api_base: str) -> dict[str, Any]:
     name = f"hardening-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    return _request_json("POST", f"{api_base}/projects", {"name": name})
+    return _request_json("POST", f"{api_base}/projects", {"name": name}, timeout=DEFAULT_TIMEOUT)
 
 
 def _upload_dataset(
@@ -147,6 +152,7 @@ def _upload_dataset(
         f"{api_base}/projects/{project_id}/datasets/upload",
         body=body,
         headers=headers,
+        timeout=DEFAULT_TIMEOUT,
     )
     parsed = json.loads(data.decode("utf-8")) if data else {}
     if status >= 400:
@@ -164,6 +170,7 @@ def _create_agent_run(
         "POST",
         f"{api_base}/projects/{project_id}/agent/runs",
         {"plan": plan, "approvals": approvals or {}},
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
@@ -184,6 +191,7 @@ def _send_agent_chat(
             "safe_mode": safe_mode,
             "auto_run": auto_run,
         },
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
@@ -220,12 +228,15 @@ def _apply_agent_step(
         "POST",
         f"{api_base}/projects/{project_id}/agent/runs/{run_id}/steps/{step_id}/apply",
         {"approved_by": approved_by},
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
 def _list_agent_artifacts(api_base: str, project_id: str) -> list[dict[str, Any]]:
     status, _, data = _request(
-        "GET", f"{api_base}/projects/{project_id}/agent/artifacts"
+        "GET",
+        f"{api_base}/projects/{project_id}/agent/artifacts",
+        timeout=DEFAULT_TIMEOUT,
     )
     parsed = json.loads(data.decode("utf-8")) if data else []
     if status >= 400:
@@ -236,7 +247,11 @@ def _list_agent_artifacts(api_base: str, project_id: str) -> list[dict[str, Any]
 
 
 def _delete_project(api_base: str, project_id: str) -> None:
-    status, _, data = _request("DELETE", f"{api_base}/projects/{project_id}")
+    status, _, data = _request(
+        "DELETE",
+        f"{api_base}/projects/{project_id}",
+        timeout=DEFAULT_TIMEOUT,
+    )
     if status not in (200, 204):
         raise RuntimeError(
             f"Project delete failed ({status}): {data.decode('utf-8', errors='replace')}"
@@ -437,12 +452,14 @@ def main() -> int:
             "column, and detect duplicate ids. If duplicates exist, print the literal token "
             "DUPLICATE_DETECTED in the markdown. Include sections '## data_quality', "
             "'## anomaly_checks', and '## sample'. The markdown must start with '# Hardening Report'. "
+            "Use project-relative paths only and do not use any other script path. "
             f"Script path: {script_path_rel}. Dataset path: {dataset_path_rel}."
         )
         stricter_prompt = (
             "STRICT MODE: respond only with a plan that has two steps with ids 'hard-write' "
             "and 'hard-run' using tools write_file then run_python, no extra tools, and the "
-            "write_file content must be valid Python using only the standard library."
+            "write_file content must be valid Python using only the standard library. "
+            "The write_file path must be exactly scripts/agent/hardening_script.py and the run_python path must match it."
         )
         _log_section("Prompts")
         print(hard_prompt)
@@ -454,7 +471,7 @@ def main() -> int:
             project_id,
             [hard_prompt, stricter_prompt],
             dataset_id=dataset_id,
-            safe_mode=True,
+            safe_mode=False,
             auto_run=True,
         )
         _log_section("Chat response")

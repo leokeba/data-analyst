@@ -149,8 +149,10 @@ def main() -> int:
 
         chat_prompt = (
             "You are operating inside a project workspace. "
-            "Return a plan that uses ONLY these tools: list_dir, write_file, append_file, read_file, run_python. "
+            "Return a plan with EXACTLY 7 steps in the order below and no extra steps. "
+            "Use ONLY these tools: list_dir, write_file, append_file, read_file, run_python. "
             "Set requires_approval to false for every step. "
+            "Use project-relative paths only and do not use absolute paths. "
             "Step 1: use list_dir with path set exactly to '.'. "
             f"Step 2: use write_file to create a Python generator script at {generator_path} that writes "
             f"a deterministic CSV to {dataset_path} with 200 rows and columns: id, amount, category, region, day. "
@@ -160,7 +162,7 @@ def main() -> int:
             f"Step 4: use read_file to read the first 6 lines of {dataset_path}. "
             f"Step 5: use append_file to add a line 'autonomy-hard ok' to {note_path}. "
             f"Step 6: use write_file to create an analysis script at {analysis_path} that reads the CSV and writes "
-            f"a markdown report to {report_path} AND prints it to stdout. The report must include sections: "
+            f"a markdown report to {report_path} AND prints the FULL report to stdout. The report must include sections: "
             "# Hard Autonomy Report, ## Summary, ## Missing values, ## Top categories, ## Region totals, ## Sample rows. "
             "Compute row count, column count, missing values per column, top 3 categories, and total amount per region. "
             "Step 7: use run_python to execute the analysis script."
