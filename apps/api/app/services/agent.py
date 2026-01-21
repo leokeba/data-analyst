@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 import re
 import shutil
 import sqlite3
 import subprocess
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
+
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.models.db import (
     AgentArtifact,
@@ -45,9 +48,108 @@ from packages.runtime.agent import (
     ToolRouter,
     SnapshotStore,
     generate_plan,
+    generate_next_action,
     validate_path,
 )
 
+logger = logging.getLogger(__name__)
+import os
+level = os.getenv("AGENT_LOG_LEVEL", "INFO").upper()
+logger.setLevel(level)
+
+
+class ListDirArgs(BaseModel):
+    path: str
+    recursive: bool = False
+    include_hidden: bool = False
+    max_entries: int = 200
+
+
+class ReadFileArgs(BaseModel):
+    path: str
+    start_line: int = 1
+    end_line: int | None = None
+    max_lines: int = 200
+    max_bytes: int | None = None
+
+
+class SearchTextArgs(BaseModel):
+    query: str
+    path: str | None = None
+    is_regex: bool = False
+    include_hidden: bool = False
+    max_results: int = 50
+
+
+class CreateRunArgs(BaseModel):
+    dataset_id: str
+    type: Literal["ingest", "profile", "analysis", "report"]
+
+
+class PreviewDatasetArgs(BaseModel):
+    dataset_id: str
+
+
+class ListArtifactsArgs(BaseModel):
+    run_id: str | None = None
+    limit: int = 100
+    offset: int = 0
+
+
+class ListDbTablesArgs(BaseModel):
+    db_path: str | None = None
+
+
+class QueryDbArgs(BaseModel):
+    sql: str
+    db_path: str | None = None
+    limit: int = 200
+
+
+class WriteFileArgs(BaseModel):
+    path: str
+    content: str
+
+
+class AppendFileArgs(BaseModel):
+    path: str
+    content: str
+
+
+class WriteMarkdownArgs(BaseModel):
+    path: str
+    content: str
+
+
+class RunPythonArgs(BaseModel):
+    code: str | None = None
+    path: str | None = None
+
+    @model_validator(mode="after")
+    def _require_code_or_path(self) -> "RunPythonArgs":
+        if not (self.code and self.code.strip()) and not (self.path and self.path.strip()):
+            raise ValueError("run_python requires code or path")
+        return self
+
+
+class RunShellArgs(BaseModel):
+    command: str
+    cwd: str | None = None
+    timeout: int | None = None
+    dry_run: bool = False
+
+
+class CreateSnapshotArgs(BaseModel):
+    kind: str
+    path: str
+    run_id: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class RequestRollbackArgs(BaseModel):
+    run_id: str | None = None
+    snapshot_id: str | None = None
+    note: str | None = None
 
 def _tool_run_factory(project_id: str):
     def _handler(args: dict[str, Any]) -> ToolResult:
@@ -64,6 +166,7 @@ def _tool_run_factory(project_id: str):
         description="Create a dataset run (ingest/profile/analysis/report).",
         handler=_handler,
         destructive=False,
+        args_model=CreateRunArgs,
     )
 
 
@@ -83,6 +186,7 @@ def _tool_preview_factory(project_id: str):
         description="Fetch dataset preview (CSV only).",
         handler=_handler,
         destructive=False,
+        args_model=PreviewDatasetArgs,
     )
 
 
@@ -125,6 +229,7 @@ def _tool_list_artifacts_factory(project_id: str):
         description="List artifacts for the project (optional run_id filter).",
         handler=_handler,
         destructive=False,
+        args_model=ListArtifactsArgs,
     )
 
 
@@ -133,8 +238,8 @@ def _tool_list_dir_factory(project_id: str, policy: AgentPolicy):
         project = store.get_project(project_id)
         if not project:
             raise ValueError("Project not found")
-        path_value = args.get("path") or project.workspace_path
-        resolved = validate_path(str(path_value), policy)
+        workspace_root = Path(project.workspace_path).resolve()
+        resolved = _resolve_project_path(project, args.get("path"), policy)
         include_hidden = bool(args.get("include_hidden", False))
         recursive = bool(args.get("recursive", False))
         max_entries = int(args.get("max_entries", 200))
@@ -144,31 +249,64 @@ def _tool_list_dir_factory(project_id: str, policy: AgentPolicy):
             name = entry.name
             if not include_hidden and name.startswith("."):
                 continue
+            relative_path = str(entry.relative_to(workspace_root))
             entries.append(
                 {
-                    "path": str(entry),
+                    "path": relative_path,
                     "type": "dir" if entry.is_dir() else "file",
                     "size": entry.stat().st_size if entry.is_file() else None,
                 }
             )
             if len(entries) >= max_entries:
                 break
-        return ToolResult(output={"path": str(resolved), "entries": entries})
+        relative_root = _relative_to_workspace(resolved, workspace_root)
+        return ToolResult(output={"path": relative_root, "entries": entries})
 
     return ToolDefinition(
         name="list_dir",
-        description="List files and directories in the project workspace.",
+        description=(
+            "List files and directories in the project workspace. "
+            "Always include args.path; use '.' for root or 'data/raw' for subdirectories."
+        ),
         handler=_handler,
         destructive=False,
+        args_model=ListDirArgs,
     )
+
+
+def _resolve_project_path(
+    project: Any,
+    path_value: str | None,
+    policy: AgentPolicy,
+    default_to_workspace: bool = True,
+) -> Path:
+    workspace_root = Path(project.workspace_path).resolve()
+    if path_value:
+        raw_path = Path(str(path_value))
+        if raw_path.is_absolute():
+            resolved = raw_path.resolve()
+            if resolved != workspace_root and workspace_root not in resolved.parents:
+                raise ValueError("Path must be within the project workspace")
+            return validate_path(str(resolved), policy)
+        return validate_path(str(workspace_root / raw_path), policy)
+    if default_to_workspace:
+        return validate_path(str(workspace_root), policy)
+    raise ValueError("Path is required")
+
+
+def _relative_to_workspace(path: Path, workspace_root: Path) -> str:
+    return "." if path == workspace_root else str(path.relative_to(workspace_root))
 
 
 def _tool_read_file_factory(project_id: str, policy: AgentPolicy):
     def _handler(args: dict[str, Any]) -> ToolResult:
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
         path_value = str(args.get("path", ""))
         if not path_value:
             raise ValueError("Path is required")
-        resolved = validate_path(path_value, policy)
+        resolved = _resolve_project_path(project, path_value, policy, default_to_workspace=False)
         if not resolved.is_file():
             raise ValueError("File not found")
         start_line = int(args.get("start_line", 1))
@@ -196,9 +334,10 @@ def _tool_read_file_factory(project_id: str, policy: AgentPolicy):
                     truncated = True
                     break
                 lines.append(line.rstrip("\n"))
+        workspace_root = Path(project.workspace_path).resolve()
         return ToolResult(
             output={
-                "path": str(resolved),
+                "path": _relative_to_workspace(resolved, workspace_root),
                 "start_line": start_line,
                 "end_line": start_line + len(lines) - 1 if lines else start_line,
                 "lines": lines,
@@ -208,9 +347,10 @@ def _tool_read_file_factory(project_id: str, policy: AgentPolicy):
 
     return ToolDefinition(
         name="read_file",
-        description="Read a file from the project workspace (line range).",
+        description="Read a file from the project workspace (line range). Use relative paths.",
         handler=_handler,
         destructive=False,
+        args_model=ReadFileArgs,
     )
 
 
@@ -222,13 +362,17 @@ def _tool_search_text_factory(project_id: str, policy: AgentPolicy):
         query = str(args.get("query", "")).strip()
         if not query:
             raise ValueError("Query is required")
-        path_value = args.get("path") or project.workspace_path
-        resolved = validate_path(str(path_value), policy)
+        path_value = args.get("path")
+        if path_value:
+            resolved = _resolve_project_path(project, str(path_value), policy)
+        else:
+            resolved = _resolve_project_path(project, None, policy)
         is_regex = bool(args.get("is_regex", False))
         include_hidden = bool(args.get("include_hidden", False))
         max_results = int(args.get("max_results", 50))
         pattern = re.compile(query) if is_regex else None
         results: list[dict[str, Any]] = []
+        workspace_root = Path(project.workspace_path).resolve()
         for file_path in resolved.rglob("*"):
             if file_path.is_dir():
                 continue
@@ -242,7 +386,7 @@ def _tool_search_text_factory(project_id: str, policy: AgentPolicy):
                         if matched:
                             results.append(
                                 {
-                                    "path": str(file_path),
+                                    "path": _relative_to_workspace(file_path, workspace_root),
                                     "line": line_no,
                                     "text": line.rstrip("\n"),
                                 }
@@ -258,6 +402,7 @@ def _tool_search_text_factory(project_id: str, policy: AgentPolicy):
         description="Search text in workspace files (string or regex).",
         handler=_handler,
         destructive=False,
+        args_model=SearchTextArgs,
     )
 
 
@@ -314,6 +459,7 @@ def _tool_list_db_tables_factory(project_id: str, policy: AgentPolicy):
         description="List tables and columns from a SQLite database.",
         handler=_handler,
         destructive=False,
+        args_model=ListDbTablesArgs,
     )
 
 
@@ -360,16 +506,20 @@ def _tool_query_db_factory(project_id: str, policy: AgentPolicy):
         description="Run a read-only SQL query against a SQLite database.",
         handler=_handler,
         destructive=False,
+        args_model=QueryDbArgs,
     )
 
 
 def _tool_write_file_factory(project_id: str, policy: AgentPolicy):
     def _handler(args: dict[str, Any]) -> ToolResult:
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
         path_value = str(args.get("path", ""))
         content = str(args.get("content", ""))
         if not path_value:
             raise ValueError("Path is required")
-        resolved = validate_path(path_value, policy)
+        resolved = _resolve_project_path(project, path_value, policy, default_to_workspace=False)
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content)
         artifact = _upsert_agent_artifact(
@@ -380,26 +530,34 @@ def _tool_write_file_factory(project_id: str, policy: AgentPolicy):
             resolved,
             "text/plain",
         )
+        workspace_root = Path(project.workspace_path).resolve()
         return ToolResult(
-            output={"path": str(resolved), "bytes": resolved.stat().st_size},
+            output={
+                "path": _relative_to_workspace(resolved, workspace_root),
+                "bytes": resolved.stat().st_size,
+            },
             artifacts=[artifact.id],
         )
 
     return ToolDefinition(
         name="write_file",
-        description="Write a text file to the project workspace.",
+        description="Write a text file to the project workspace (use relative paths).",
         handler=_handler,
         destructive=True,
+        args_model=WriteFileArgs,
     )
 
 
 def _tool_append_file_factory(project_id: str, policy: AgentPolicy):
     def _handler(args: dict[str, Any]) -> ToolResult:
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
         path_value = str(args.get("path", ""))
         content = str(args.get("content", ""))
         if not path_value:
             raise ValueError("Path is required")
-        resolved = validate_path(path_value, policy)
+        resolved = _resolve_project_path(project, path_value, policy, default_to_workspace=False)
         resolved.parent.mkdir(parents=True, exist_ok=True)
         with resolved.open("a", encoding="utf-8") as handle:
             handle.write(content)
@@ -411,26 +569,38 @@ def _tool_append_file_factory(project_id: str, policy: AgentPolicy):
             resolved,
             "text/plain",
         )
+        workspace_root = Path(project.workspace_path).resolve()
         return ToolResult(
-            output={"path": str(resolved), "bytes": resolved.stat().st_size},
+            output={
+                "path": _relative_to_workspace(resolved, workspace_root),
+                "bytes": resolved.stat().st_size,
+            },
             artifacts=[artifact.id],
         )
 
     return ToolDefinition(
         name="append_file",
-        description="Append text to a file in the project workspace.",
+        description="Append text to a file in the project workspace (use relative paths).",
         handler=_handler,
         destructive=True,
+        args_model=AppendFileArgs,
     )
 
 
 def _tool_write_markdown_factory(project_id: str, policy: AgentPolicy):
     def _handler(args: dict[str, Any]) -> ToolResult:
+        project = store.get_project(project_id)
+        if not project:
+            raise ValueError("Project not found")
         path_value = str(args.get("path", ""))
         content = str(args.get("content", ""))
         if not path_value:
             raise ValueError("Path is required")
-        resolved = validate_path(path_value, policy)
+        if not content.strip():
+            raise ValueError("Markdown content is required")
+        if "<compose" in content.lower():
+            raise ValueError("Markdown content cannot be a placeholder")
+        resolved = _resolve_project_path(project, path_value, policy, default_to_workspace=False)
         if resolved.suffix.lower() != ".md":
             raise ValueError("Markdown files must end with .md")
         resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -443,16 +613,21 @@ def _tool_write_markdown_factory(project_id: str, policy: AgentPolicy):
             resolved,
             "text/markdown",
         )
+        workspace_root = Path(project.workspace_path).resolve()
         return ToolResult(
-            output={"path": str(resolved), "bytes": resolved.stat().st_size},
+            output={
+                "path": _relative_to_workspace(resolved, workspace_root),
+                "bytes": resolved.stat().st_size,
+            },
             artifacts=[artifact.id],
         )
 
     return ToolDefinition(
         name="write_markdown",
-        description="Write a markdown report in the project workspace.",
+        description="Write a markdown report in the project workspace (use relative paths).",
         handler=_handler,
         destructive=True,
+        args_model=WriteMarkdownArgs,
     )
 
 
@@ -467,7 +642,7 @@ def _tool_run_python_factory(project_id: str, policy: AgentPolicy):
         if not code and not path_value:
             raise ValueError("Provide code or a path to a script")
         if path_value:
-            script_path = validate_path(str(path_value), policy)
+            script_path = _resolve_project_path(project, str(path_value), policy, default_to_workspace=False)
         else:
             scripts_dir = workspace_root / "scripts" / "agent"
             scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -475,7 +650,7 @@ def _tool_run_python_factory(project_id: str, policy: AgentPolicy):
             script_path.write_text(str(code))
         result = subprocess.run(
             ["uv", "run", "python", str(script_path)],
-            cwd=str(Path(__file__).resolve().parents[4]),
+            cwd=str(workspace_root),
             capture_output=True,
             text=True,
             timeout=30,
@@ -505,7 +680,7 @@ def _tool_run_python_factory(project_id: str, policy: AgentPolicy):
             raise RuntimeError(f"Python script failed: {result.stderr}")
         return ToolResult(
             output={
-                "path": str(script_path),
+                "path": _relative_to_workspace(script_path, workspace_root),
                 "exit_code": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
@@ -515,9 +690,13 @@ def _tool_run_python_factory(project_id: str, policy: AgentPolicy):
 
     return ToolDefinition(
         name="run_python",
-        description="Execute a Python script inside the project workspace.",
+        description=(
+            "Execute a Python script inside the project workspace. "
+            "Provide args.code or a relative args.path."
+        ),
         handler=_handler,
         destructive=True,
+        args_model=RunPythonArgs,
     )
 
 
@@ -538,16 +717,23 @@ def _tool_run_shell_factory(project_id: str, policy: AgentPolicy):
                 raise PermissionError("Command not in allowlist")
         cwd_value = args.get("cwd")
         if cwd_value:
-            cwd = validate_path(str(cwd_value), policy)
+            project = store.get_project(project_id)
+            if not project:
+                raise ValueError("Project not found")
+            cwd = _resolve_project_path(project, str(cwd_value), policy, default_to_workspace=False)
         else:
             project = store.get_project(project_id)
             if not project:
                 raise ValueError("Project not found")
-            cwd = validate_path(str(project.workspace_path), policy)
+            cwd = _resolve_project_path(project, None, policy)
         timeout = int(args.get("timeout", policy.max_shell_seconds))
         if bool(args.get("dry_run", False)):
             return ToolResult(
-                output={"command": command, "cwd": str(cwd), "dry_run": True}
+                output={
+                    "command": command,
+                    "cwd": _relative_to_workspace(cwd, Path(project.workspace_path).resolve()),
+                    "dry_run": True,
+                }
             )
         result = subprocess.run(
             command,
@@ -557,10 +743,11 @@ def _tool_run_shell_factory(project_id: str, policy: AgentPolicy):
             timeout=timeout,
             shell=True,
         )
+        workspace_root = Path(project.workspace_path).resolve()
         return ToolResult(
             output={
                 "command": command,
-                "cwd": str(cwd),
+                "cwd": _relative_to_workspace(cwd, workspace_root),
                 "exit_code": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
@@ -569,9 +756,10 @@ def _tool_run_shell_factory(project_id: str, policy: AgentPolicy):
 
     return ToolDefinition(
         name="run_shell",
-        description="Run a shell command inside the project workspace.",
+        description="Run a shell command inside the project workspace (cwd is relative).",
         handler=_handler,
         destructive=True,
+        args_model=RunShellArgs,
     )
 
 
@@ -605,6 +793,7 @@ def _tool_create_snapshot_factory(project_id: str):
         description="Create a snapshot record for a workspace path.",
         handler=_handler,
         destructive=False,
+        args_model=CreateSnapshotArgs,
     )
 
 
@@ -643,6 +832,7 @@ def _tool_request_rollback_factory(project_id: str):
         description="Request a rollback for a snapshot or run.",
         handler=_handler,
         destructive=False,
+        args_model=RequestRollbackArgs,
     )
 
 
@@ -681,9 +871,14 @@ def _plan_to_payload(plan: Plan) -> AgentPlanCreate:
 
 def _tool_catalog(router: ToolRouter) -> list[dict[str, Any]]:
     arg_hints = {
-        "list_dir": {"path": "string (optional)", "recursive": "bool", "include_hidden": "bool", "max_entries": "int"},
+        "list_dir": {
+            "path": "string (required, relative; use '.' for root, e.g., 'data/raw')",
+            "recursive": "bool",
+            "include_hidden": "bool",
+            "max_entries": "int",
+        },
         "read_file": {
-            "path": "string",
+            "path": "string (required, relative; e.g., 'data/raw/sales.csv')",
             "start_line": "int",
             "end_line": "int (optional)",
             "max_lines": "int",
@@ -703,13 +898,16 @@ def _tool_catalog(router: ToolRouter) -> list[dict[str, Any]]:
         "list_project_sqlite": {},
         "list_db_tables": {"db_path": "string (optional)"},
         "query_db": {"sql": "string", "db_path": "string (optional)", "limit": "int"},
-        "write_file": {"path": "string", "content": "string"},
-        "append_file": {"path": "string", "content": "string"},
-        "write_markdown": {"path": "string", "content": "string"},
-        "run_python": {"code": "string (optional)", "path": "string (optional)"},
+        "write_file": {"path": "string (relative)", "content": "string"},
+        "append_file": {"path": "string (relative)", "content": "string"},
+        "write_markdown": {"path": "string (relative)", "content": "string"},
+        "run_python": {
+            "code": "string (required if no path)",
+            "path": "string (required if no code, relative)",
+        },
         "run_shell": {
             "command": "string",
-            "cwd": "string (optional)",
+            "cwd": "string (optional, relative)",
             "timeout": "int",
             "dry_run": "bool",
         },
@@ -883,6 +1081,52 @@ def _compact_output(output: dict[str, Any] | None, limit: int = 500) -> dict[str
     return compact
 
 
+def _compact_context(payload: Any, text_limit: int = 400, list_limit: int = 8) -> Any:
+    if payload is None:
+        return None
+    if isinstance(payload, str):
+        return _truncate_text(payload, text_limit)
+    if isinstance(payload, (int, float, bool)):
+        return payload
+    if isinstance(payload, dict):
+        compact: dict[str, Any] = {}
+        for key, value in payload.items():
+            compact[key] = _compact_context(value, text_limit, list_limit)
+        return compact
+    if isinstance(payload, list):
+        return [_compact_context(item, text_limit, list_limit) for item in payload[:list_limit]]
+    return str(payload)
+
+
+def _format_context_log(prompt: str, context: Any) -> str:
+    compact = {
+        "prompt": _truncate_text(prompt, 800),
+        "context": _compact_context(context),
+    }
+    try:
+        return json.dumps(compact, ensure_ascii=True, indent=2)
+    except Exception:
+        return str(compact)
+
+
+def _observation_from_log_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    output = entry.get("output") or {}
+    entries = []
+    if isinstance(output, dict) and isinstance(output.get("entries"), list):
+        entries = output.get("entries")[:10]
+    return {
+        "tool": entry.get("tool"),
+        "status": entry.get("status"),
+        "error": entry.get("error"),
+        "path": output.get("path"),
+        "entries": entries,
+        "stdout": _truncate_text(output.get("stdout")),
+        "stderr": _truncate_text(output.get("stderr")),
+        "summary": _truncate_text(output.get("summary")),
+        "keys": list(output.keys()) if isinstance(output, dict) else [],
+    }
+
+
 def _summarize_run_log(log: list[dict[str, Any]], max_items: int = 6) -> list[dict[str, Any]]:
     summary: list[dict[str, Any]] = []
     for entry in log[-max_items:]:
@@ -901,6 +1145,45 @@ def _summarize_run_log(log: list[dict[str, Any]], max_items: int = 6) -> list[di
     return summary
 
 
+def _validate_step_args(step: PlanStep) -> str | None:
+    if not step.tool:
+        return "Step tool is required"
+    args = step.args or {}
+    if step.tool == "list_dir":
+        path_value = args.get("path")
+        if not isinstance(path_value, str) or not path_value.strip():
+            return "list_dir requires args.path (use '.' for root)"
+    if step.tool == "read_file":
+        path_value = args.get("path")
+        if not isinstance(path_value, str) or not path_value.strip():
+            return "read_file requires args.path"
+    if step.tool == "run_python":
+        code_value = args.get("code")
+        path_value = args.get("path")
+        has_code = isinstance(code_value, str) and code_value.strip()
+        has_path = isinstance(path_value, str) and path_value.strip()
+        if not has_code and not has_path:
+            return "run_python requires args.code or args.path"
+    return None
+
+
+def _validate_and_normalize_step(step: PlanStep, router: ToolRouter) -> str | None:
+    if not step.tool:
+        return "Step tool is required"
+    tools = {tool.name: tool for tool in router.list_tools()}
+    tool = tools.get(step.tool)
+    if not tool:
+        return f"Tool not registered: {step.tool}"
+    if tool.args_model:
+        try:
+            parsed = tool.args_model(**(step.args or {}))
+        except ValidationError as exc:
+            return f"{step.tool} args invalid: {exc}"
+        step.args = parsed.model_dump(mode="json", exclude_none=True)
+        return None
+    return _validate_step_args(step)
+
+
 def _run_has_failures(run: AgentRunRead) -> bool:
     if run.status == AgentRunStatus.FAILED:
         return True
@@ -911,7 +1194,7 @@ def _run_has_failures(run: AgentRunRead) -> bool:
 
 
 def list_tools(project_id: str) -> list[AgentToolRead]:
-    router, _ = _build_router(project_id)
+    router, policy = _build_router(project_id)
     return [
         AgentToolRead(
             name=tool.name,
@@ -924,7 +1207,12 @@ def list_tools(project_id: str) -> list[AgentToolRead]:
 
 def run_plan(project_id: str, payload: AgentPlanCreate, approvals: dict[str, AgentApproval] | None) -> AgentRunRead:
     plan = _build_plan(payload)
+    logger.debug("agent.run_plan.start", extra={"project_id": project_id, "steps": len(plan.steps)})
     router, policy = _build_router(project_id)
+    for step in plan.steps:
+        validation_error = _validate_and_normalize_step(step, router)
+        if validation_error:
+            raise ValueError(validation_error)
     journal = ActionJournal()
     snapshots = SnapshotStore(policy=policy)
     runtime = AgentRuntime(router, journal, snapshots)
@@ -932,6 +1220,15 @@ def run_plan(project_id: str, payload: AgentPlanCreate, approvals: dict[str, Age
     status = _compute_status(plan)
     plan_payload = _plan_to_payload(plan)
     log = journal.to_log()
+    logger.debug(
+        "agent.run_plan.complete",
+        extra={
+            "project_id": project_id,
+            "status": status.value,
+            "steps": len(plan.steps),
+            "log_entries": len(log),
+        },
+    )
     agent_run = AgentRun(
         project_id=project_id,
         status=status.value,
@@ -1016,10 +1313,16 @@ def apply_run_step(
     step = next((item for item in plan.steps if item.id == step_id), None)
     if not step:
         return None
+    validation_error = _validate_step_args(step)
+    if validation_error:
+        raise ValueError(validation_error)
     if step.requires_approval and approval is None:
         raise ValueError("Approval required for this step")
     approval_payload = Approval(**approval.model_dump()) if approval else None
     router, policy = _build_router(project_id)
+    validation_error = _validate_and_normalize_step(step, router)
+    if validation_error:
+        raise ValueError(validation_error)
     journal = ActionJournal()
     snapshots = SnapshotStore(policy=policy)
     runtime = AgentRuntime(router, journal, snapshots)
@@ -1411,60 +1714,152 @@ def send_chat_message(
     safe_mode: bool = True,
     auto_run: bool = True,
 ) -> tuple[AgentChatMessage, AgentChatMessage, AgentRunRead | None]:
+    logger.debug(
+        "agent.chat.start",
+        extra={
+            "project_id": project_id,
+            "dataset_id": dataset_id,
+            "safe_mode": safe_mode,
+            "auto_run": auto_run,
+            "content_length": len(content),
+        },
+    )
     user_message = create_chat_message(project_id, "user", content)
-    router, _ = _build_router(project_id)
+    router, policy = _build_router(project_id)
     tool_catalog = _tool_catalog(router)
+    logger.debug(
+        "agent.chat.tools",
+        extra={"project_id": project_id, "tools": [tool["name"] for tool in tool_catalog]},
+    )
     plan: AgentPlanCreate | None = None
     run: AgentRunRead | None = None
     assistant_content = "Saved your note."
 
     if auto_run:
-        context: dict[str, Any] = {}
-        max_iters = 3
-        for iteration in range(1, max_iters + 1):
-            plan_payload = generate_plan(
-                prompt=content,
-                tool_catalog=tool_catalog,
-                dataset_id=dataset_id,
-                safe_mode=safe_mode,
-                context=context,
-            )
-            plan = AgentPlanCreate(
-                objective=plan_payload.objective,
-                steps=[
-                    AgentPlanStepCreate(
-                        title=step.title,
-                        description=step.description,
-                        tool=step.tool,
-                        args=step.args,
-                        requires_approval=step.requires_approval,
-                    )
-                    for step in plan_payload.steps
-                ],
-            )
-            plan = _apply_safe_mode(plan, router, safe_mode)
-            if not plan.steps:
-                break
-            run = run_plan(project_id, plan, approvals=None)
-            if not _run_has_failures(run):
-                break
-            context = {
-                "iteration": iteration,
-                "last_plan": plan.model_dump(),
-                "last_run": {
-                    "id": run.id,
-                    "status": run.status.value,
-                    "log_summary": _summarize_run_log(run.log),
-                },
-                "note": "Previous run had failures. Revise the plan to address them.",
-            }
+        max_steps = 12
+        logger.debug("agent.chat.plan.generate", extra={"project_id": project_id, "iteration": 0})
+        logger.debug(
+            "agent.chat.context %s",
+            _format_context_log(content, None),
+            extra={"project_id": project_id, "iteration": 0},
+        )
+        plan_payload = generate_plan(
+            prompt=content,
+            tool_catalog=tool_catalog,
+            dataset_id=dataset_id,
+            safe_mode=safe_mode,
+            context=None,
+            max_steps=max_steps,
+        )
+        plan = AgentPlanCreate(
+            objective=plan_payload.objective,
+            steps=[
+                AgentPlanStepCreate(
+                    title=step.title,
+                    description=step.description,
+                    tool=step.tool,
+                    args=step.args.model_dump(mode="json", exclude_none=True)
+                    if isinstance(step.args, BaseModel)
+                    else step.args,
+                    requires_approval=step.requires_approval,
+                )
+                for step in plan_payload.steps
+            ],
+        )
+        plan = _apply_safe_mode(plan, router, safe_mode)
+        plan_model = _build_plan(plan)
+        journal = ActionJournal()
+        snapshots = SnapshotStore(policy=policy)
+        runtime = AgentRuntime(router, journal, snapshots, step_budget=len(plan_model.steps))
+        loop_failed = False
+        analysis_ready = False
+        report_ready = False
 
+        for step in plan_model.steps:
+            if step.requires_approval:
+                record = journal.start(plan_model.id, step)
+                journal.fail(record, "Approval required for this step")
+                step.status = StepStatus.FAILED
+                loop_failed = True
+                break
+            if step.tool == "write_markdown" and not analysis_ready:
+                record = journal.start(plan_model.id, step)
+                journal.fail(record, "write_markdown blocked until analysis outputs exist")
+                step.status = StepStatus.FAILED
+                loop_failed = True
+                break
+            validation_error = _validate_and_normalize_step(step, router)
+            if validation_error:
+                record = journal.start(plan_model.id, step)
+                journal.fail(record, validation_error)
+                step.status = StepStatus.FAILED
+                loop_failed = True
+                break
+
+            runtime.run_step(plan_model, step, approval=None)
+            latest_log = journal.to_log()[-1]
+            if latest_log.get("status") == StepStatus.FAILED.value:
+                loop_failed = True
+                break
+            if step.tool == "run_python" and latest_log.get("status") == StepStatus.APPLIED.value:
+                analysis_ready = True
+            if step.tool == "write_markdown" and latest_log.get("status") == StepStatus.APPLIED.value:
+                report_ready = True
+
+        if any(step.tool == "write_markdown" for step in plan_model.steps) and not report_ready:
+            loop_failed = True
+
+        status = AgentRunStatus.FAILED if loop_failed else _compute_status(plan_model)
+        plan = _plan_to_payload(plan_model)
+        log = journal.to_log()
+        logger.debug(
+            "agent.run_plan.complete",
+            extra={
+                "project_id": project_id,
+                "status": status.value,
+                "steps": len(plan_model.steps),
+                "log_entries": len(log),
+            },
+        )
+        agent_run = AgentRun(
+            project_id=project_id,
+            status=status.value,
+            plan=plan_model.model_dump(mode="json"),
+            log=log,
+        )
+        with get_session() as session:
+            session.add(agent_run)
+            session.commit()
+            session.refresh(agent_run)
+        _write_run_artifacts(project_id, agent_run.id, plan_model.model_dump(mode="json"), log)
+        run = AgentRunRead(
+            id=agent_run.id,
+            project_id=agent_run.project_id,
+            status=AgentRunStatus(agent_run.status),
+            plan=plan,
+            log=log,
+        )
+        logger.debug(
+            "agent.chat.run.complete",
+            extra={
+                "project_id": project_id,
+                "run_id": run.id,
+                "status": run.status.value,
+                "log_entries": len(run.log),
+            },
+        )
         if run and run.plan.steps:
             step_list = ", ".join(step.tool or "step" for step in run.plan.steps)
             assistant_content = (
                 f"Created agent run {run.id} with {len(run.plan.steps)} step(s): {step_list}."
             )
     else:
+        logger.debug("agent.chat.plan.generate", extra={"project_id": project_id, "iteration": 0})
+        logger.debug(
+            "agent.chat.context %s",
+            _format_context_log(content, None),
+            extra={"project_id": project_id, "iteration": 0},
+        )
         plan_payload = generate_plan(
             prompt=content,
             tool_catalog=tool_catalog,
@@ -1479,13 +1874,19 @@ def send_chat_message(
                     title=step.title,
                     description=step.description,
                     tool=step.tool,
-                    args=step.args,
+                    args=step.args.model_dump(mode="json", exclude_none=True)
+                    if isinstance(step.args, BaseModel)
+                    else step.args,
                     requires_approval=step.requires_approval,
                 )
                 for step in plan_payload.steps
             ],
         )
         plan = _apply_safe_mode(plan, router, safe_mode)
+        logger.debug(
+            "agent.chat.plan.built",
+            extra={"project_id": project_id, "steps": len(plan.steps)},
+        )
         if plan.steps:
             step_list = ", ".join(step.tool or "step" for step in plan.steps)
             assistant_content = (
@@ -1497,5 +1898,13 @@ def send_chat_message(
         "assistant",
         assistant_content,
         run_id=run.id if run else None,
+    )
+    logger.debug(
+        "agent.chat.complete",
+        extra={
+            "project_id": project_id,
+            "run_id": run.id if run else None,
+            "assistant_message": assistant_message.id,
+        },
     )
     return user_message, assistant_message, run

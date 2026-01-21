@@ -23,6 +23,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -274,13 +275,15 @@ def _expected_metrics(sales_rows: list[dict[str, Any]], marketing_rows: list[dic
     }
 
 
-def _find_report_path(run: dict[str, Any]) -> str | None:
+def _find_report_path(run: dict[str, Any], workspace_path: str) -> str | None:
     for entry in run.get("log") or []:
         if entry.get("tool") in {"write_markdown", "write_file"}:
             output = entry.get("output") or {}
             path = output.get("path")
             if isinstance(path, str) and path.endswith("autonomy-real-report.md"):
-                return path
+                if path.startswith("/"):
+                    return path
+                return str(Path(workspace_path) / path)
     return None
 
 
@@ -349,16 +352,21 @@ def main() -> int:
 
         expected = _expected_metrics(sales_rows, marketing_rows)
         report_path = f"{workspace_path}/artifacts/agent/autonomy-real-report.md"
+        report_path_rel = "artifacts/agent/autonomy-real-report.md"
 
         chat_prompt = (
             "You are an autonomous analyst. We uploaded three datasets to the project: sales.csv, marketing.csv, support.csv. "
             "Your task is to explore the datasets, make hypotheses, and produce a rigorous markdown report. "
             "You decide the steps and tools. Use any available tools as needed. "
             "Use only Python standard library modules (csv, statistics, collections); do not use pandas. "
-            f"The datasets are stored under {workspace_path}/data/raw/ as sales.csv, marketing.csv, support.csv. "
+            "The datasets are stored under data/raw/ as sales.csv, marketing.csv, support.csv. "
             "Schema hints: sales.csv columns = date, region, product, units, unit_price, discount_pct. "
             "marketing.csv columns = date, region, spend. support.csv columns = date, region, tickets, severity. "
-            f"Save the report to {report_path}. "
+            "Note: discount_pct is a fraction (0.00-0.10), not a percentage, and severity is text (low/high), not numeric. "
+            "You must run a Python analysis step to compute metrics from the CSVs before writing the report. "
+            "Every report section must contain at least two sentences AND include numeric references derived from the data. "
+            "If you use write_markdown, its content must include the full report; do not leave content empty. "
+            f"Save the report to {report_path_rel}. "
             "The report must include these sections: # Real Autonomy Report, ## Executive summary, ## Data quality checks, "
             "## Key findings, ## Hypotheses, ## Suggested next actions, ## Appendix. "
             "In the Appendix, include a 'Verification' block with the exact key=value pairs below, using 2 decimals for currency and 3 decimals for the correlation: "
@@ -385,7 +393,7 @@ def main() -> int:
         if _run_has_failures(run):
             raise RuntimeError("Agent run failed or contained failed steps")
 
-        report_on_disk = _find_report_path(run) or report_path
+        report_on_disk = _find_report_path(run, workspace_path) or report_path
         report_text = _read_report(report_on_disk)
 
         required_sections = [

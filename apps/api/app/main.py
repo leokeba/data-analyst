@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import logging
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -13,6 +15,15 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 load_dotenv(dotenv_path=ROOT / ".env")
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logging.getLogger("uvicorn").setLevel(LOG_LEVEL)
+logging.getLogger("uvicorn.error").setLevel(LOG_LEVEL)
+logging.getLogger("uvicorn.access").setLevel(LOG_LEVEL)
 
 from app.routes.agent import router as agent_router
 from app.routes.artifacts import router as artifacts_router
