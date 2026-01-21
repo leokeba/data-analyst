@@ -49,6 +49,7 @@ from packages.runtime.agent import (
     SnapshotStore,
     generate_plan,
     generate_next_action,
+    generate_reflection,
     validate_path,
 )
 
@@ -1770,12 +1771,23 @@ def send_chat_message(
         plan_model = _build_plan(plan)
         journal = ActionJournal()
         snapshots = SnapshotStore(policy=policy)
-        runtime = AgentRuntime(router, journal, snapshots, step_budget=len(plan_model.steps))
+        runtime = AgentRuntime(router, journal, snapshots, step_budget=max_steps)
+        tools_by_name = {tool.name: tool for tool in router.list_tools()}
         loop_failed = False
         analysis_ready = False
         report_ready = False
+        steps_run = 0
+        step_index = 0
 
-        for step in plan_model.steps:
+        while step_index < len(plan_model.steps) and steps_run < max_steps:
+            step = plan_model.steps[step_index]
+            if (
+                safe_mode
+                and step.tool
+                and step.tool in tools_by_name
+                and tools_by_name[step.tool].destructive
+            ):
+                step.requires_approval = True
             if step.requires_approval:
                 record = journal.start(plan_model.id, step)
                 journal.fail(record, "Approval required for this step")
@@ -1798,16 +1810,116 @@ def send_chat_message(
 
             runtime.run_step(plan_model, step, approval=None)
             latest_log = journal.to_log()[-1]
-            if latest_log.get("status") == StepStatus.FAILED.value:
-                loop_failed = True
-                break
+            step_failed = latest_log.get("status") == StepStatus.FAILED.value
             if step.tool == "run_python" and latest_log.get("status") == StepStatus.APPLIED.value:
                 analysis_ready = True
             if step.tool == "write_markdown" and latest_log.get("status") == StepStatus.APPLIED.value:
                 report_ready = True
 
+            reflection_context = {
+                "objective": plan_model.objective,
+                "last_step": {
+                    "id": step.id,
+                    "title": step.title,
+                    "tool": step.tool,
+                    "args": step.args,
+                },
+                "log_summary": _summarize_run_log(journal.to_log()),
+                "analysis_ready": analysis_ready,
+                "report_ready": report_ready,
+            }
+            reflection = generate_reflection(
+                prompt=content,
+                tool_catalog=tool_catalog,
+                dataset_id=dataset_id,
+                safe_mode=safe_mode,
+                context=reflection_context,
+            )
+            journal.record_feedback(
+                plan_model.id,
+                step.id,
+                "reflection",
+                reflection.model_dump(mode="json"),
+            )
+
+            if reflection.next_action_needed and steps_run < max_steps:
+                next_context = {
+                    **reflection_context,
+                    "reflection": reflection.model_dump(mode="json"),
+                }
+                logger.debug(
+                    "agent.chat.next_action",
+                    extra={"project_id": project_id, "iteration": steps_run + 1},
+                )
+                next_action = generate_next_action(
+                    prompt=content,
+                    tool_catalog=tool_catalog,
+                    dataset_id=dataset_id,
+                    safe_mode=safe_mode,
+                    context=next_context,
+                )
+                if next_action.objective:
+                    plan_model.objective = next_action.objective
+                if next_action.finish:
+                    break
+                if next_action.step:
+                    new_step = PlanStep(
+                        id=uuid4().hex,
+                        title=next_action.step.title,
+                        description=next_action.step.description,
+                        tool=next_action.step.tool,
+                        args=next_action.step.args.model_dump(mode="json", exclude_none=True)
+                        if isinstance(next_action.step.args, BaseModel)
+                        else next_action.step.args,
+                        requires_approval=next_action.step.requires_approval,
+                    )
+                    if (
+                        safe_mode
+                        and new_step.tool
+                        and new_step.tool in tools_by_name
+                        and tools_by_name[new_step.tool].destructive
+                    ):
+                        new_step.requires_approval = True
+                    plan_model.steps.append(new_step)
+
+            if step_failed and not reflection.next_action_needed:
+                loop_failed = True
+                break
+
+            steps_run += 1
+            step_index += 1
+
         if any(step.tool == "write_markdown" for step in plan_model.steps) and not report_ready:
             loop_failed = True
+
+        if journal.records:
+            summary_context = {
+                "objective": plan_model.objective,
+                "log_summary": _summarize_run_log(journal.to_log()),
+                "analysis_ready": analysis_ready,
+                "report_ready": report_ready,
+                "final": True,
+            }
+            try:
+                summary_reflection = generate_reflection(
+                    prompt=content,
+                    tool_catalog=tool_catalog,
+                    dataset_id=dataset_id,
+                    safe_mode=safe_mode,
+                    context=summary_context,
+                )
+                last_step_id = plan_model.steps[-1].id if plan_model.steps else plan_model.id
+                journal.record_feedback(
+                    plan_model.id,
+                    last_step_id,
+                    "reflection_summary",
+                    summary_reflection.model_dump(mode="json"),
+                )
+            except LLMError:
+                logger.debug(
+                    "agent.chat.reflection_summary.failed",
+                    extra={"project_id": project_id},
+                )
 
         status = AgentRunStatus.FAILED if loop_failed else _compute_status(plan_model)
         plan = _plan_to_payload(plan_model)

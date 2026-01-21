@@ -27,7 +27,10 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+DEFAULT_TIMEOUT = int(os.environ.get("AGENT_EVAL_TIMEOUT", "240"))
 
 
 @dataclass
@@ -68,7 +71,7 @@ def _request(
     url: str,
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> tuple[int, dict[str, str], bytes]:
     req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     try:
@@ -82,11 +85,14 @@ def _request(
 
 
 def _request_json(
-    method: str, url: str, payload: dict[str, Any] | None = None
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
     body = json.dumps(payload or {}).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if payload is not None else {}
-    status, _, data = _request(method, url, body=body, headers=headers)
+    status, _, data = _request(method, url, body=body, headers=headers, timeout=timeout)
     try:
         parsed = json.loads(data.decode("utf-8")) if data else {}
     except json.JSONDecodeError:
@@ -120,7 +126,7 @@ def _encode_multipart(
 
 
 def _health_check(api_base: str) -> None:
-    status, _, data = _request("GET", f"{api_base}/health")
+    status, _, data = _request("GET", f"{api_base}/health", timeout=DEFAULT_TIMEOUT)
     if status != 200:
         raise RuntimeError(
             f"Health check failed ({status}): {data.decode('utf-8', errors='replace')}"
@@ -129,7 +135,7 @@ def _health_check(api_base: str) -> None:
 
 def _create_project(api_base: str) -> dict[str, Any]:
     name = f"e2e-eval-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    return _request_json("POST", f"{api_base}/projects", {"name": name})
+    return _request_json("POST", f"{api_base}/projects", {"name": name}, timeout=DEFAULT_TIMEOUT)
 
 
 def _upload_dataset(
@@ -142,6 +148,7 @@ def _upload_dataset(
         f"{api_base}/projects/{project_id}/datasets/upload",
         body=body,
         headers=headers,
+        timeout=DEFAULT_TIMEOUT,
     )
     parsed = json.loads(data.decode("utf-8")) if data else {}
     if status >= 400:
@@ -159,6 +166,7 @@ def _create_agent_run(
         "POST",
         f"{api_base}/projects/{project_id}/agent/runs",
         {"plan": plan, "approvals": approvals or {}},
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
@@ -179,6 +187,7 @@ def _send_agent_chat(
             "safe_mode": safe_mode,
             "auto_run": auto_run,
         },
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
@@ -215,12 +224,15 @@ def _apply_agent_step(
         "POST",
         f"{api_base}/projects/{project_id}/agent/runs/{run_id}/steps/{step_id}/apply",
         {"approved_by": approved_by},
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
 def _list_agent_artifacts(api_base: str, project_id: str) -> list[dict[str, Any]]:
     status, _, data = _request(
-        "GET", f"{api_base}/projects/{project_id}/agent/artifacts"
+        "GET",
+        f"{api_base}/projects/{project_id}/agent/artifacts",
+        timeout=DEFAULT_TIMEOUT,
     )
     parsed = json.loads(data.decode("utf-8")) if data else []
     if status >= 400:
@@ -231,7 +243,11 @@ def _list_agent_artifacts(api_base: str, project_id: str) -> list[dict[str, Any]
 
 
 def _delete_project(api_base: str, project_id: str) -> None:
-    status, _, data = _request("DELETE", f"{api_base}/projects/{project_id}")
+    status, _, data = _request(
+        "DELETE",
+        f"{api_base}/projects/{project_id}",
+        timeout=DEFAULT_TIMEOUT,
+    )
     if status not in (200, 204):
         raise RuntimeError(
             f"Project delete failed ({status}): {data.decode('utf-8', errors='replace')}"
@@ -352,7 +368,7 @@ def _collect_invalid_paths(plan: dict[str, Any], workspace_path: str) -> list[st
         args = step.get("args") or {}
         path = args.get("path")
         if isinstance(path, str) and path:
-            if not path.startswith(workspace_path):
+            if Path(path).is_absolute() and not path.startswith(workspace_path):
                 invalid.append(path)
     return invalid
 
@@ -499,19 +515,22 @@ def main() -> int:
         _log_json("Orders", orders_dataset)
 
         base_path = base_source.replace("file://", "")
+        base_path_rel = "data/raw/base-data.csv"
+        if base_path.startswith(workspace_path + "/"):
+            base_path_rel = base_path[len(workspace_path) + 1 :]
         basic_prompt = (
             "Write a Python script that reads the CSV dataset at the path below and produces a markdown report "
             "with row/column counts, missing values by column, and the top 3 categories for each categorical column. "
             "You may use pandas/polars/matplotlib if available, otherwise use the standard library. "
             "Use write_file to save the script under the provided script path, then run_python to execute it. "
-            f"Script path: {workspace_path}/scripts/agent/chat_basic_analysis.py. "
-            f"Dataset path: {base_path}."
+            "Script path: scripts/agent/chat_basic_analysis.py. "
+            f"Dataset path: {base_path_rel}."
         )
         basic_prompt_strict = (
             "Return a JSON plan with exactly two steps: write_file then run_python. "
             "Use only tools from the catalog. "
-            f"Script path: {workspace_path}/scripts/agent/chat_basic_analysis.py. "
-            f"Dataset path: {base_path}."
+            "Script path: scripts/agent/chat_basic_analysis.py. "
+            f"Dataset path: {base_path_rel}."
         )
         _run_chat_task(
             api_base=api_base,
@@ -520,29 +539,35 @@ def main() -> int:
             dataset_id=base_id,
             title="chat_basic_analysis",
             prompts=[basic_prompt, basic_prompt_strict],
-            report_path=f"{workspace_path}/artifacts/agent/chat-basic-report.md",
+            report_path="artifacts/agent/chat-basic-report.md",
             required_headers=["#", "##"],
             steps=steps,
         )
 
         customers_path = customers_source.replace("file://", "")
         orders_path = orders_source.replace("file://", "")
+        customers_path_rel = "data/raw/customers.csv"
+        orders_path_rel = "data/raw/orders.csv"
+        if customers_path.startswith(workspace_path + "/"):
+            customers_path_rel = customers_path[len(workspace_path) + 1 :]
+        if orders_path.startswith(workspace_path + "/"):
+            orders_path_rel = orders_path[len(workspace_path) + 1 :]
         join_prompt = (
             "Write a Python script that joins orders.csv with customers.csv on customer_id, "
             "then generates a markdown report with missing customers, duplicate order_ids, "
             "average order amount by segment and by channel, plus a small sample table. "
             "You may use pandas/polars/matplotlib if available; otherwise standard library is fine. "
             "Use write_file to save the script under the provided script path, then run_python to execute it. "
-            f"Script path: {workspace_path}/scripts/agent/chat_join_analysis.py. "
-            f"Customers path: {customers_path}. "
-            f"Orders path: {orders_path}."
+            "Script path: scripts/agent/chat_join_analysis.py. "
+            f"Customers path: {customers_path_rel}. "
+            f"Orders path: {orders_path_rel}."
         )
         join_prompt_strict = (
             "Return a JSON plan with exactly two steps: write_file then run_python. "
             "Use only tools from the catalog. "
-            f"Script path: {workspace_path}/scripts/agent/chat_join_analysis.py. "
-            f"Customers path: {customers_path}. "
-            f"Orders path: {orders_path}."
+            "Script path: scripts/agent/chat_join_analysis.py. "
+            f"Customers path: {customers_path_rel}. "
+            f"Orders path: {orders_path_rel}."
         )
         _run_chat_task(
             api_base=api_base,
@@ -551,7 +576,7 @@ def main() -> int:
             dataset_id=orders_id,
             title="chat_join_analysis",
             prompts=[join_prompt, join_prompt_strict],
-            report_path=f"{workspace_path}/artifacts/agent/chat-join-report.md",
+            report_path="artifacts/agent/chat-join-report.md",
             required_headers=["#", "## Missing", "## Duplicate", "##"],
             steps=steps,
         )

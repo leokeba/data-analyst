@@ -194,6 +194,13 @@ class NextActionPayload(BaseModel):
     step: PlanStepPayload | None = None
 
 
+class ReflectionPayload(BaseModel):
+    score: float = Field(ge=0.0, le=1.0)
+    passed: bool
+    critique: str
+    next_action_needed: bool = False
+
+
 def _validate_step_payload(step: PlanStepPayload) -> None:
     if not step.tool:
         raise LLMError("Step tool is required")
@@ -467,5 +474,30 @@ def generate_next_action(
         _validate_step_payload(next_action.step)
 
     return next_action
+
+
+def generate_reflection(
+    prompt: str,
+    tool_catalog: list[dict[str, Any]],
+    dataset_id: str | None,
+    safe_mode: bool,
+    context: dict[str, Any] | None = None,
+) -> ReflectionPayload:
+    system = (
+        "You are the Evaluator. Review the latest step execution and overall progress. "
+        "Return JSON with score (0-1), passed (bool), critique (string), and "
+        "next_action_needed (bool). "
+        "Be strict and concise; if the objective is not yet met, set next_action_needed=true. "
+        "Use only the provided context; do not assume unseen files or outputs. "
+        "Respond with JSON ONLY that matches the provided schema."
+    )
+    user_payload = {
+        "prompt": prompt,
+        "dataset_id": dataset_id,
+        "safe_mode": safe_mode,
+        "tools": tool_catalog,
+        "context": context or {},
+    }
+    return _request_structured_response(system, user_payload, ReflectionPayload)
 
 

@@ -40,5 +40,23 @@ class ActionJournal(BaseModel):
         record.error = error
         return record
 
+    def record_feedback(
+        self,
+        run_id: str,
+        step_id: str,
+        tool: str,
+        output: dict[str, Any],
+    ) -> ActionRecord:
+        record = ActionRecord(
+            run_id=run_id,
+            step_id=step_id,
+            tool=tool,
+            status=StepStatus.APPLIED,
+            output=output,
+            finished_at=_now(),
+        )
+        self.records.append(record)
+        return record
+
     def to_log(self) -> list[dict[str, Any]]:
         return [record.model_dump(mode="json") for record in self.records]

@@ -1,5 +1,5 @@
 from .journal import ActionJournal
-from .llm import LLMError, generate_plan, generate_next_action
+from .llm import LLMError, generate_plan, generate_next_action, generate_reflection
 from .models import (
     ActionRecord,
     AgentRole,
@@ -33,6 +33,7 @@ __all__ = [
     "SnapshotStore",
     "generate_plan",
     "generate_next_action",
+    "generate_reflection",
     "repo_root",
     "validate_path",
 ]

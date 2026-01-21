@@ -30,6 +30,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+DEFAULT_TIMEOUT = int(os.environ.get("AGENT_EVAL_TIMEOUT", "240"))
+
+
 @dataclass
 class EvalStep:
     name: str
@@ -64,7 +67,7 @@ def _request(
     url: str,
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> tuple[int, dict[str, str], bytes]:
     req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     try:
@@ -77,10 +80,15 @@ def _request(
         raise RuntimeError(f"Request failed: {exc}") from exc
 
 
-def _request_json(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _request_json(
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
     body = json.dumps(payload or {}).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if payload is not None else {}
-    status, _, data = _request(method, url, body=body, headers=headers)
+    status, _, data = _request(method, url, body=body, headers=headers, timeout=timeout)
     try:
         parsed = json.loads(data.decode("utf-8")) if data else {}
     except json.JSONDecodeError:
@@ -112,14 +120,14 @@ def _encode_multipart(field_name: str, filename: str, content: bytes) -> tuple[b
 
 
 def _health_check(api_base: str) -> None:
-    status, _, data = _request("GET", f"{api_base}/health")
+    status, _, data = _request("GET", f"{api_base}/health", timeout=DEFAULT_TIMEOUT)
     if status != 200:
         raise RuntimeError(f"Health check failed ({status}): {data.decode('utf-8', errors='replace')}")
 
 
 def _create_project(api_base: str) -> dict[str, Any]:
     name = f"e2e-eval-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    return _request_json("POST", f"{api_base}/projects", {"name": name})
+    return _request_json("POST", f"{api_base}/projects", {"name": name}, timeout=DEFAULT_TIMEOUT)
 
 
 def _upload_dataset(api_base: str, project_id: str, csv_bytes: bytes) -> dict[str, Any]:
@@ -130,6 +138,7 @@ def _upload_dataset(api_base: str, project_id: str, csv_bytes: bytes) -> dict[st
         f"{api_base}/projects/{project_id}/datasets/upload",
         body=body,
         headers=headers,
+        timeout=DEFAULT_TIMEOUT,
     )
     parsed = json.loads(data.decode("utf-8")) if data else {}
     if status >= 400:
@@ -147,6 +156,7 @@ def _create_agent_run(
         "POST",
         f"{api_base}/projects/{project_id}/agent/runs",
         {"plan": plan, "approvals": approvals or {}},
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
@@ -167,6 +177,7 @@ def _send_agent_chat(
             "safe_mode": safe_mode,
             "auto_run": auto_run,
         },
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
@@ -203,11 +214,16 @@ def _apply_agent_step(
         "POST",
         f"{api_base}/projects/{project_id}/agent/runs/{run_id}/steps/{step_id}/apply",
         {"approved_by": approved_by},
+        timeout=DEFAULT_TIMEOUT,
     )
 
 
 def _list_agent_artifacts(api_base: str, project_id: str) -> list[dict[str, Any]]:
-    status, _, data = _request("GET", f"{api_base}/projects/{project_id}/agent/artifacts")
+    status, _, data = _request(
+        "GET",
+        f"{api_base}/projects/{project_id}/agent/artifacts",
+        timeout=DEFAULT_TIMEOUT,
+    )
     parsed = json.loads(data.decode("utf-8")) if data else []
     if status >= 400:
         raise RuntimeError(f"Artifact list failed ({status}): {parsed}")
@@ -217,7 +233,11 @@ def _list_agent_artifacts(api_base: str, project_id: str) -> list[dict[str, Any]
 
 
 def _delete_project(api_base: str, project_id: str) -> None:
-    status, _, data = _request("DELETE", f"{api_base}/projects/{project_id}")
+    status, _, data = _request(
+        "DELETE",
+        f"{api_base}/projects/{project_id}",
+        timeout=DEFAULT_TIMEOUT,
+    )
     if status not in (200, 204):
         raise RuntimeError(
             f"Project delete failed ({status}): {data.decode('utf-8', errors='replace')}"
@@ -422,10 +442,17 @@ def main() -> int:
         _log_section("Dataset")
         _log_json("Dataset", dataset)
 
-        analysis_script = _build_analysis_script(dataset_source)
+        dataset_fs_path = dataset_source
+        if dataset_fs_path.startswith("file://"):
+            dataset_fs_path = dataset_fs_path[len("file://") :]
+        dataset_path_rel = "data/raw/e2e-data.csv"
+        if dataset_fs_path.startswith(workspace_path + "/"):
+            dataset_path_rel = dataset_fs_path[len(workspace_path) + 1 :]
+
+        analysis_script = _build_analysis_script(dataset_path_rel)
         _log_section("Analysis script")
         print(analysis_script)
-        script_path = f"{workspace_path}/scripts/agent/e2e_eval_analysis.py"
+        script_path = "scripts/agent/e2e_eval_analysis.py"
         plan = {
             "objective": "Create and run a Python analysis script that emits a markdown report.",
             "steps": [
@@ -474,7 +501,7 @@ def main() -> int:
             raise RuntimeError("Markdown report missing missing-values section")
         steps.append(EvalStep("agent_run_python", True, "markdown emitted"))
 
-        report_path = f"{workspace_path}/artifacts/agent/e2e-report.md"
+        report_path = "artifacts/agent/e2e-report.md"
         write_plan = {
             "objective": "Persist the markdown report to the project workspace.",
             "steps": [
@@ -512,10 +539,7 @@ def main() -> int:
         _log_section("Markdown artifact")
         _log_json("Markdown artifact", markdown_artifact)
 
-        chat_script_path = f"{workspace_path}/scripts/agent/chat_eval_script.py"
-        dataset_fs_path = dataset_source
-        if dataset_fs_path.startswith("file://"):
-            dataset_fs_path = dataset_fs_path[len("file://") :]
+        chat_script_path = "scripts/agent/chat_eval_script.py"
         chat_prompt = (
             "Create a simple Python script that reads the CSV dataset at the path below, "
             "computes basic stats (row/column counts, missing values), and prints a markdown report. "
@@ -523,7 +547,7 @@ def main() -> int:
             "Use write_file with the exact path provided, then run_python with the same path. "
             "Only use the write_file and run_python tools. The script must print the markdown report to stdout. "
             f"Script path: {chat_script_path}. "
-            f"Dataset path: {dataset_fs_path}."
+            f"Dataset path: {dataset_path_rel}."
         )
         chat_prompt_strict = (
             "Return a plan with exactly two steps. "
@@ -532,7 +556,7 @@ def main() -> int:
             "Use only standard library modules (csv, statistics, collections). "
             "The script must print a markdown report to stdout. "
             f"Script path: {chat_script_path}. "
-            f"Dataset path: {dataset_fs_path}."
+            f"Dataset path: {dataset_path_rel}."
         )
         _log_section("Chat prompts")
         print(chat_prompt)
@@ -571,7 +595,7 @@ def main() -> int:
             raise RuntimeError("Chat-run markdown report missing markdown header")
         steps.append(EvalStep("chat_run_python", True, "chat-driven markdown emitted"))
 
-        chat_report_path = f"{workspace_path}/artifacts/agent/e2e-chat-report.md"
+        chat_report_path = "artifacts/agent/e2e-chat-report.md"
         chat_write_plan = {
             "objective": "Persist the chat-driven markdown report to the project workspace.",
             "steps": [

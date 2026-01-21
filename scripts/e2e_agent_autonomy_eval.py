@@ -10,7 +10,8 @@ Usage:
   uv run python scripts/e2e_agent_autonomy_eval.py
 
 Optional environment variables:
-  API_BASE=http://127.0.0.1:8000
+    API_BASE=http://127.0.0.1:8000
+    AGENT_EVAL_TIMEOUT=240
 """
 from __future__ import annotations
 
@@ -59,10 +60,15 @@ def _request(
         raise RuntimeError(f"Request failed: {exc}") from exc
 
 
-def _request_json(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _request_json(
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    timeout: int = 30,
+) -> dict[str, Any]:
     body = json.dumps(payload or {}).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if payload is not None else {}
-    status, _, data = _request(method, url, body=body, headers=headers)
+    status, _, data = _request(method, url, body=body, headers=headers, timeout=timeout)
     try:
         parsed = json.loads(data.decode("utf-8")) if data else {}
     except json.JSONDecodeError:
@@ -74,17 +80,17 @@ def _request_json(method: str, url: str, payload: dict[str, Any] | None = None) 
     return parsed
 
 
-def _health_check(api_base: str) -> None:
-    status, _, data = _request("GET", f"{api_base}/health")
+def _health_check(api_base: str, timeout: int) -> None:
+    status, _, data = _request("GET", f"{api_base}/health", timeout=timeout)
     if status != 200:
         raise RuntimeError(
             f"Health check failed ({status}): {data.decode('utf-8', errors='replace')}"
         )
 
 
-def _create_project(api_base: str) -> dict[str, Any]:
+def _create_project(api_base: str, timeout: int) -> dict[str, Any]:
     name = f"e2e-autonomy-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    return _request_json("POST", f"{api_base}/projects", {"name": name})
+    return _request_json("POST", f"{api_base}/projects", {"name": name}, timeout=timeout)
 
 
 def _send_agent_chat(
@@ -93,41 +99,48 @@ def _send_agent_chat(
     content: str,
     safe_mode: bool = False,
     auto_run: bool = True,
+    timeout: int = 30,
 ) -> dict[str, Any]:
     return _request_json(
         "POST",
         f"{api_base}/projects/{project_id}/agent/chat",
         {"content": content, "dataset_id": None, "safe_mode": safe_mode, "auto_run": auto_run},
+        timeout=timeout,
     )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run autonomy evaluation against the agent API.")
     parser.add_argument("--api-base", default=os.environ.get("API_BASE", "http://127.0.0.1:8000"))
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=int(os.environ.get("AGENT_EVAL_TIMEOUT", "240")),
+    )
     args = parser.parse_args()
 
     api_base = args.api_base.rstrip("/")
     steps: list[EvalStep] = []
 
     try:
-        _health_check(api_base)
+        _health_check(api_base, args.timeout)
         steps.append(EvalStep("health_check", True, "API reachable"))
         _log_section("API")
         print(f"API base: {api_base}")
 
-        project = _create_project(api_base)
+        project = _create_project(api_base, args.timeout)
         project_id = project["id"]
         workspace_path = project["workspace_path"]
         steps.append(EvalStep("create_project", True, f"project_id={project_id}"))
         _log_section("Project")
         _log_json("Project", project)
 
-        script_path = f"{workspace_path}/scripts/agent/autonomy_check.py"
-        note_path = f"{workspace_path}/notes/agent-autonomy.txt"
+        script_path = "scripts/agent/autonomy_check.py"
+        note_path = "notes/agent-autonomy.txt"
         chat_prompt = (
             "You are operating inside a project workspace. "
             "Return a plan that uses ONLY these tools: list_dir, write_file, read_file, run_python. "
-            f"Steps: (1) use list_dir with path set exactly to {workspace_path} to confirm structure; "
+            "Steps: (1) use list_dir with path set exactly to '.' to confirm structure; "
             f"(2) use write_file to create a note at {note_path} with content 'autonomy ok'; "
             f"(3) use read_file to read back {note_path}; "
             f"(4) use write_file to create a Python script at {script_path} that prints 'autonomy ok' "
@@ -136,7 +149,14 @@ def main() -> int:
         _log_section("Chat prompt")
         print(chat_prompt)
 
-        chat_response = _send_agent_chat(api_base, project_id, chat_prompt, safe_mode=False, auto_run=True)
+        chat_response = _send_agent_chat(
+            api_base,
+            project_id,
+            chat_prompt,
+            safe_mode=False,
+            auto_run=True,
+            timeout=args.timeout,
+        )
         _log_section("Chat response")
         _log_json("Chat response", chat_response)
         run = chat_response.get("run")

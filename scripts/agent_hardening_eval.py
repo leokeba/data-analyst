@@ -30,6 +30,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -302,6 +303,7 @@ def _validate_plan(
     *,
     expected_tools: list[str],
     script_path: str,
+    script_path_rel: str,
     workspace_path: str,
     allowed_tools: set[str],
 ) -> None:
@@ -321,12 +323,18 @@ def _validate_plan(
         args = step.get("args") or {}
         path = args.get("path")
         if isinstance(path, str) and path:
-            if not path.startswith(workspace_path):
+            is_absolute = Path(path).is_absolute()
+            if is_absolute and not path.startswith(workspace_path):
                 raise RuntimeError(f"Step {idx} path escapes workspace: {path}")
-            if expected_tool in {"write_file", "run_python"} and path != script_path:
-                raise RuntimeError(
-                    f"Step {idx} must target script path {script_path}, got {path}"
-                )
+            if expected_tool in {"write_file", "run_python"}:
+                if is_absolute and path != script_path:
+                    raise RuntimeError(
+                        f"Step {idx} must target script path {script_path}, got {path}"
+                    )
+                if not is_absolute and path != script_path_rel:
+                    raise RuntimeError(
+                        f"Step {idx} must target script path {script_path_rel}, got {path}"
+                    )
 
 
 def _validate_markdown(report: str) -> None:
@@ -413,8 +421,13 @@ def main() -> int:
         debug_payload["dataset"] = dataset
 
         dataset_path = dataset_source.replace("file://", "")
+        dataset_path_rel = "data/raw/edge-data.csv"
+        if dataset_path.startswith(workspace_path + "/"):
+            dataset_path_rel = dataset_path[len(workspace_path) + 1 :]
         script_path = f"{workspace_path}/scripts/agent/hardening_script.py"
+        script_path_rel = "scripts/agent/hardening_script.py"
         report_path = f"{workspace_path}/artifacts/agent/hardening-report.md"
+        report_path_rel = "artifacts/agent/hardening-report.md"
 
         hard_prompt = (
             "Return a JSON plan with exactly two steps: write_file then run_python. "
@@ -424,7 +437,7 @@ def main() -> int:
             "column, and detect duplicate ids. If duplicates exist, print the literal token "
             "DUPLICATE_DETECTED in the markdown. Include sections '## data_quality', "
             "'## anomaly_checks', and '## sample'. The markdown must start with '# Hardening Report'. "
-            f"Script path: {script_path}. Dataset path: {dataset_path}."
+            f"Script path: {script_path_rel}. Dataset path: {dataset_path_rel}."
         )
         stricter_prompt = (
             "STRICT MODE: respond only with a plan that has two steps with ids 'hard-write' "
@@ -457,6 +470,7 @@ def main() -> int:
             plan,
             expected_tools=["write_file", "run_python"],
             script_path=script_path,
+            script_path_rel=script_path_rel,
             workspace_path=workspace_path,
             allowed_tools={"write_file", "run_python"},
         )
@@ -489,7 +503,7 @@ def main() -> int:
                     "title": "Write hardening markdown",
                     "description": "Write the markdown report produced by the hardening scenario.",
                     "tool": "write_markdown",
-                    "args": {"path": report_path, "content": chat_stdout},
+                    "args": {"path": report_path_rel, "content": chat_stdout},
                     "requires_approval": False,
                 }
             ],

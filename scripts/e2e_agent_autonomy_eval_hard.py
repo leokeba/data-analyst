@@ -141,17 +141,17 @@ def main() -> int:
         _log_section("Project")
         _log_json("Project", project)
 
-        generator_path = f"{workspace_path}/scripts/agent/generate_sales.py"
-        dataset_path = f"{workspace_path}/data/raw/sales.csv"
-        note_path = f"{workspace_path}/metadata/notes.txt"
-        analysis_path = f"{workspace_path}/scripts/agent/analyze_sales.py"
-        report_path = f"{workspace_path}/artifacts/agent/hard-report.md"
+        generator_path = "scripts/agent/generate_sales.py"
+        dataset_path = "data/raw/sales.csv"
+        note_path = "metadata/notes.txt"
+        analysis_path = "scripts/agent/analyze_sales.py"
+        report_path = "artifacts/agent/hard-report.md"
 
         chat_prompt = (
             "You are operating inside a project workspace. "
             "Return a plan that uses ONLY these tools: list_dir, write_file, append_file, read_file, run_python. "
             "Set requires_approval to false for every step. "
-            f"Step 1: use list_dir with path set exactly to {workspace_path}. "
+            "Step 1: use list_dir with path set exactly to '.'. "
             f"Step 2: use write_file to create a Python generator script at {generator_path} that writes "
             f"a deterministic CSV to {dataset_path} with 200 rows and columns: id, amount, category, region, day. "
             "Use random.seed(42). Categories: hardware, software, services. Regions: north, south, east, west. "
