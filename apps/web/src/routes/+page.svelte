@@ -1030,10 +1030,8 @@
 			clearInterval(agentRunPoller);
 		}
 		agentRunPoller = setInterval(() => {
-			if (agentRuns.some((run) => run.status === 'pending')) {
-				loadAgentRuns();
-				loadAgentArtifacts();
-			}
+			loadAgentRuns();
+			loadAgentArtifacts();
 		}, 2000);
 	}
 
