@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+import json
 import os
 import re
 import sqlite3
@@ -454,9 +455,20 @@ class ProjectToolRuntime:
                 error=str(exc),
             )
 
-    def write_markdown(self, path: str, content: str) -> dict[str, Any]:
-        args = {"path": path}
+    def write_markdown(self, path: str, content: str, results_path: str | None = None) -> dict[str, Any]:
+        args = {"path": path, "results_path": results_path}
         try:
+            has_placeholders = bool(_RESULT_PLACEHOLDER.search(content))
+            if has_placeholders and not results_path:
+                raise ValueError("results_path is required when markdown contains {{placeholders}}")
+            if results_path:
+                resolved_results = self._resolve(results_path)
+                if not resolved_results.is_file():
+                    raise ValueError(f"Results file not found: {results_path}")
+                payload = json.loads(resolved_results.read_text(encoding="utf-8", errors="replace"))
+                if not isinstance(payload, dict):
+                    raise ValueError("Results file must contain a JSON object")
+                content = _fill_results_placeholders(content, payload)
             target = self._resolve(path)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
@@ -600,18 +612,26 @@ def _script_looks_hardcoded(source: str) -> bool:
 
 def _script_missing_inputs(source: str, workspace_root: Path) -> list[str]:
     missing: list[str] = []
-    patterns = [
+    file_read_patterns = [
         r"(?:pandas|pd)\.read_csv\(\s*['\"]([^'\"]+)['\"]",
         r"(?:pandas|pd)\.read_json\(\s*['\"]([^'\"]+)['\"]",
         r"(?:pandas|pd)\.read_parquet\(\s*['\"]([^'\"]+)['\"]",
         r"(?:pandas|pd)\.read_excel\(\s*['\"]([^'\"]+)['\"]",
         r"(?:pandas|pd)\.read_table\(\s*['\"]([^'\"]+)['\"]",
-        r"\bopen\(\s*['\"]([^'\"]+)['\"]",
         r"sqlite3\.connect\(\s*['\"]([^'\"]+)['\"]",
     ]
+    open_pattern = r"\bopen\(\s*['\"]([^'\"]+)['\"](?:\s*,\s*['\"]([^'\"]+)['\"])?"
+
     candidates: list[str] = []
-    for pattern in patterns:
+    for pattern in file_read_patterns:
         candidates.extend(re.findall(pattern, source))
+
+    for raw_path, mode in re.findall(open_pattern, source):
+        mode_value = (mode or "r").lower()
+        if any(flag in mode_value for flag in ("w", "a", "x", "+")) and "r" not in mode_value:
+            continue
+        candidates.append(raw_path)
+
     for raw_path in candidates:
         if not raw_path or "://" in raw_path:
             continue
@@ -625,6 +645,26 @@ def _script_missing_inputs(source: str, workspace_root: Path) -> list[str]:
         except Exception:
             missing.append(raw_path)
     return sorted(set(missing))
+
+
+_RESULT_PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
+
+
+def _fill_results_placeholders(content: str, results: dict[str, Any]) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in results:
+            raise ValueError(f"Missing result for placeholder: {key}")
+        value = results[key]
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    filled = _RESULT_PLACEHOLDER.sub(_replace, content)
+    remaining = _RESULT_PLACEHOLDER.findall(filled)
+    if remaining:
+        raise ValueError(f"Unresolved placeholders: {', '.join(sorted(set(remaining)))}")
+    return filled
 
 
 _TOOL_SPECS: list[AgentToolRead] = [
@@ -654,7 +694,13 @@ _TOOL_SPECS: list[AgentToolRead] = [
         destructive=False,
     ),
     AgentToolRead(name="write_file", description="Write a text file.", destructive=True),
-    AgentToolRead(name="write_markdown", description="Write a markdown file.", destructive=True),
+    AgentToolRead(
+        name="write_markdown",
+        description=(
+            "Write a markdown file. Supports results_path to fill {{placeholders}} from a JSON results file."
+        ),
+        destructive=True,
+    ),
     AgentToolRead(
         name="run_python",
         description=(
