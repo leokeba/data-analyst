@@ -439,6 +439,18 @@ class ProjectToolRuntime:
                 raise ValueError("run_python requires code or path")
             if path:
                 target = self._resolve(path)
+                if target.suffix.lower() != ".py":
+                    return self._log(
+                        "run_python",
+                        args,
+                        {
+                            "error": "run_python only accepts .py scripts when using path.",
+                            "path": str(target.relative_to(self.workspace_root)),
+                            "hint": "Use run_python with inline code to read CSV/JSON files.",
+                        },
+                        status="failed",
+                        error="Invalid run_python path",
+                    )
                 source = target.read_text(encoding="utf-8", errors="replace")
             else:
                 run_id = uuid4().hex

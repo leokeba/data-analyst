@@ -141,7 +141,7 @@ def list_projects(limit: int = 100, offset: int = 0) -> list[ProjectRead]:
     with get_session() as session:
         projects = session.exec(
             select(Project)
-            .order_by(Project.created_at)
+            .order_by(Project.created_at.desc())
             .offset(offset)
             .limit(limit)
         ).all()
