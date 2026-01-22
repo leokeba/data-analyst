@@ -540,7 +540,7 @@ class ProjectToolRuntime:
                         "path": str(target.relative_to(self.workspace_root)),
                     },
                     status="failed",
-                    error="Missing input files for run_python",
+                    error=f"Missing input files for run_python: {', '.join(missing_inputs)}",
                 )
             if not _script_reads_data(source) and _script_looks_hardcoded(source):
                 return self._log(
