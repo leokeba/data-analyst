@@ -39,6 +39,7 @@
 			tool?: string | null;
 			artifacts?: string[];
 			diff?: string | null;
+			args?: Record<string, unknown> | null;
 			output?: Record<string, unknown> | null;
 			approvals?: { approved_by?: string; approved_at?: string; note?: string | null }[];
 			created_at?: string;
@@ -127,17 +128,31 @@
 		return '';
 	};
 
+	const truncateText = (text: string, limit = 800) =>
+		text.length > limit ? `${text.slice(0, limit)}…` : text;
+
 	const summarizeOutput = (output?: Record<string, unknown> | null) => {
 		if (!output) return '';
 		const stdout = output.stdout as string | undefined;
 		const stderr = output.stderr as string | undefined;
 		const path = output.path as string | undefined;
+		const error = output.error as string | undefined;
 		const summary: string[] = [];
 		if (path) summary.push(`path: ${path}`);
-		if (stdout) summary.push(`stdout: ${stdout.slice(0, 180)}`);
-		if (stderr) summary.push(`stderr: ${stderr.slice(0, 180)}`);
+		if (stdout) summary.push(`stdout: ${truncateText(stdout, 800)}`);
+		if (stderr) summary.push(`stderr: ${truncateText(stderr, 1200)}`);
+		if (error) summary.push(`error: ${truncateText(error, 1200)}`);
 		if (!summary.length) return JSON.stringify(output, null, 2);
 		return summary.join('\n');
+	};
+
+	const formatPayload = (payload: Record<string, unknown> | null | undefined) => {
+		if (!payload) return '';
+		try {
+			return JSON.stringify(payload, null, 2);
+		} catch {
+			return String(payload);
+		}
 	};
 
 	const resolveArtifactId = (path?: string) => {
@@ -252,6 +267,11 @@
 								<span>{new Date(item.entry.created_at).toLocaleTimeString()}</span>
 							{/if}
 						</div>
+						{#if item.entry.args}
+							<div class="tool-args">
+								<pre class="preview">{formatPayload(item.entry.args)}</pre>
+							</div>
+						{/if}
 						{#if item.entry.output}
 							<pre class="preview">{summarizeOutput(item.entry.output)}</pre>
 						{/if}
