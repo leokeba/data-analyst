@@ -530,17 +530,18 @@ class ProjectToolRuntime:
                 self._record_artifact(target, "text_file", "text/plain")
             missing_inputs = _script_missing_inputs(source, self.workspace_root)
             if missing_inputs:
+                missing_text = ", ".join(missing_inputs)
                 return self._log(
                     "run_python",
                     args,
                     {
-                        "error": "Script references input files that do not exist in the workspace.",
+                        "error": f"Script references input files that do not exist in the workspace: {missing_text}",
                         "missing_inputs": missing_inputs,
                         "hint": "Use list_dir/read_file to locate data files before running scripts.",
                         "path": str(target.relative_to(self.workspace_root)),
                     },
                     status="failed",
-                    error=f"Missing input files for run_python: {', '.join(missing_inputs)}",
+                    error=f"Missing input files for run_python: {missing_text}",
                 )
             if not _script_reads_data(source) and _script_looks_hardcoded(source):
                 return self._log(
@@ -552,6 +553,18 @@ class ProjectToolRuntime:
                     },
                     status="failed",
                     error="Script must load workspace data; hard-coded arrays are not allowed.",
+                )
+            if "results.json" in source and not _script_reads_data(source):
+                return self._log(
+                    "run_python",
+                    args,
+                    {
+                        "error": "Script writes results.json without reading any workspace data sources.",
+                        "path": str(target.relative_to(self.workspace_root)),
+                        "hint": "Load data from CSV/JSON/DB before computing results.json.",
+                    },
+                    status="failed",
+                    error="Results must be derived from workspace data sources.",
                 )
             cmd = ["uv", "run", "python", str(target.relative_to(self.workspace_root))]
             env = os.environ.copy()

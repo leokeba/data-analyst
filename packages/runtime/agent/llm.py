@@ -95,6 +95,8 @@ def build_agent(
         "Do not pass .csv/.json/.db paths to run_python; use inline code. "
         "Do not reference non-existent script paths. "
         "Scripts must load workspace data; no hard-coded arrays or fabricated metrics. "
+        "Never synthesize datasets in code (no inlined tables or 'simulated' values). "
+        "If a value is reported, it must be derived from workspace files or database queries in the same run. "
         "Persist computed metrics to artifacts/agent/results.json. "
         "Write reports with write_markdown using results_path and {{key}} placeholders. "
         "Do not use write_file for reports. "
