@@ -494,7 +494,15 @@ class ProjectToolRuntime:
                         status="failed",
                         error="Invalid run_python path",
                     )
-                source = target.read_text(encoding="utf-8", errors="replace")
+                if code is not None:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(code, encoding="utf-8")
+                    self._record_artifact(target, "text_file", "text/plain")
+                    source = code
+                else:
+                    if not target.exists():
+                        raise ValueError(f"Script not found: {path}")
+                    source = target.read_text(encoding="utf-8", errors="replace")
             else:
                 run_id = uuid4().hex
                 target = self._resolve(f"artifacts/agent/run_python_{run_id}.py")
