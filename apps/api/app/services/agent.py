@@ -26,6 +26,49 @@ from app.services.db import get_session
 from packages.runtime.agent.llm import AgentDeps, LLMError, build_agent
 
 
+def _repo_root() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "projects").exists():
+            return parent
+    return Path.cwd()
+
+
+def _skill_dirs(workspace_root: Path) -> list[Path]:
+    return [
+        _repo_root() / "skills",
+        workspace_root / "skills",
+    ]
+
+
+def _load_skill_files(directory: Path, max_chars: int = 4000) -> list[str]:
+    if not directory.exists() or not directory.is_dir():
+        return []
+    entries: list[str] = []
+    for path in sorted(directory.iterdir()):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in {".md", ".txt"}:
+            continue
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if not content:
+            continue
+        if len(content) > max_chars:
+            content = content[:max_chars].rstrip() + "\n\n...(truncated)"
+        entries.append(f"## {path.name}\n{content}")
+    return entries
+
+
+def _build_skills_context(workspace_root: Path) -> str:
+    sections: list[str] = []
+    for directory in _skill_dirs(workspace_root):
+        sections.extend(_load_skill_files(directory))
+    return "\n\n".join(sections).strip()
+
+
 @dataclass
 class ToolLogEntry:
     tool: str
@@ -669,7 +712,8 @@ def send_chat_message(
             workspace_root=Path(project.workspace_path),
             run_id=run.id,
         )
-        agent = build_agent()
+        skills_context = _build_skills_context(tools.workspace_root)
+        agent = build_agent(extra_instructions=skills_context or None)
         root_entries: list[str] = []
         try:
             for entry in tools.workspace_root.iterdir():

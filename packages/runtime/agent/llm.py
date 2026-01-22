@@ -65,7 +65,10 @@ def _model_name() -> str:
     return os.getenv("AGENT_MODEL", "openai:gpt-4o-mini")
 
 
-def build_agent(instructions: str | None = None) -> Agent[AgentDeps, str]:
+def build_agent(
+    instructions: str | None = None,
+    extra_instructions: str | None = None,
+) -> Agent[AgentDeps, str]:
     system_instructions = instructions or (
         "You are an autonomous data analysis agent working inside a project workspace. "
         "Purpose: investigate data, produce reliable analysis, and deliver clear reports with artifacts. "
@@ -91,6 +94,10 @@ def build_agent(instructions: str | None = None) -> Agent[AgentDeps, str]:
         "Prefer deterministic steps and verify outputs. If a tool call fails, adjust and retry. "
         "Always run scripts you write and include key results in your final response."
     )
+    if extra_instructions:
+        system_instructions = (
+            f"{system_instructions}\n\nSkills:\n{extra_instructions}"
+        )
     agent: Agent[AgentDeps, str] = Agent(
         _model_name(),
         deps_type=AgentDeps,

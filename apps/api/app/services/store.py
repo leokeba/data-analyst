@@ -40,6 +40,7 @@ def _ensure_project_workspace(project_id: str) -> Path:
     (root / "metadata").mkdir(parents=True, exist_ok=True)
     (root / "secrets").mkdir(parents=True, exist_ok=True)
     (root / "env").mkdir(parents=True, exist_ok=True)
+    (root / "skills").mkdir(parents=True, exist_ok=True)
     return root
 
 
