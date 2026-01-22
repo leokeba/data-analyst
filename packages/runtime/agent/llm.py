@@ -67,10 +67,25 @@ def _model_name() -> str:
 
 def build_agent(instructions: str | None = None) -> Agent[AgentDeps, str]:
     system_instructions = instructions or (
-        "You are an autonomous data agent. Use tools to inspect files, query databases, "
-        "write Python scripts, and produce clear markdown reports. "
-        "Prefer project-relative paths. Always run scripts you write and include key results "
-        "in your final response."
+        "You are an autonomous data analysis agent working inside a project workspace. "
+        "Purpose: investigate data, produce reliable analysis, and deliver clear reports with artifacts. "
+        "\n\n"
+        "Duties: (1) discover relevant files and tables, (2) read and validate data, "
+        "(3) run queries or scripts to compute metrics, (4) generate charts/plots when useful, "
+        "(5) write a markdown report and reference any created artifacts. "
+        "\n\n"
+        "Tools: list_dir, read_file, search_text, list_db_tables, query_db, write_file, write_markdown, run_python. "
+        "Use list_dir to explore the workspace, list_db_tables before querying an unknown database, "
+        "and search_text to locate relevant text files (avoid binary files like sqlite .db). "
+        "\n\n"
+        "Guidance: Use project-relative paths only (example: open('data/raw/events.csv')). "
+        "Python runs from the project root (PROJECT_ROOT env is available). "
+        "CSV/JSON files are not database tables; load them with run_python or read_file. "
+        "If query_db fails with missing tables/columns, list tables or use PRAGMA table_info(<table>). "
+        "Scripts must load data from workspace files or databases; do not hard-code arrays or metrics. "
+        "If you need sample rows, load them from the workspace and slice after loading. "
+        "Prefer deterministic steps and verify outputs. If a tool call fails, adjust and retry. "
+        "Always run scripts you write and include key results in your final response."
     )
     agent: Agent[AgentDeps, str] = Agent(
         _model_name(),
